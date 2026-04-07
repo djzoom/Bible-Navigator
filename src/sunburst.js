@@ -43,7 +43,9 @@ const state = {
   data: null,
   root: null,
   focus: null,
-  size: 0,
+  svgW: 0,        // SVG element width  (== chart-wrap width)
+  svgH: 0,        // SVG element height (== chart-wrap height)
+  chartSize: 0,   // square chart bounding box (= min(W,H))
   radius: 0,
   dpr: 1,
   svg: null,
@@ -51,6 +53,10 @@ const state = {
   canvas: null,
   ctx: null,
   chapters: [],   // flat list of leaf nodes
+  // Pinch / pan
+  scale: 1,
+  panX: 0,
+  panY: 0,
 };
 
 const $ = sel => document.querySelector(sel);
@@ -67,6 +73,7 @@ export async function init() {
   buildHierarchy();
   setup();
   render();
+  bindGestures();
   bindControls();
   window.addEventListener('resize', debounce(() => { setup(); render(); }, 120));
 }
@@ -148,39 +155,48 @@ function buildHierarchy() {
 
 function setup() {
   const wrap = $('.chart-wrap');
-  const w = wrap.clientWidth  || window.innerWidth  || 800;
-  const h = wrap.clientHeight || window.innerHeight || 800;
-  const size = Math.max(320, Math.min(w, h) - 16);
-  state.size = size;
-  // Leave margin around the chart for leader-line labels (~70px each side)
-  state.radius = (size / 2) - 70;
+  const stage = wrap.querySelector('.chart-stage');
+  const w = Math.max(320, wrap.clientWidth  || window.innerWidth  || 800);
+  const h = Math.max(320, wrap.clientHeight || window.innerHeight || 800);
+  state.svgW = w;
+  state.svgH = h;
+  // Chart fills the smaller dimension; the radius reserves a small margin
+  // and lets labels in the wider dimension fly out toward the screen edges.
+  const isMobile = w < 720 || h < 720;
+  const margin = isMobile ? 32 : 56;
+  state.chartSize = Math.min(w, h) - 16;
+  state.radius = (state.chartSize / 2) - margin;
   state.dpr = window.devicePixelRatio || 1;
 
-  // Canvas — chapter ring (1189 arcs, full perf)
-  let canvas = wrap.querySelector('canvas');
+  // Canvas — chapter ring (square, sized to fit the chart)
+  let canvas = stage.querySelector('canvas');
   if (!canvas) {
     canvas = document.createElement('canvas');
     canvas.className = 'sunburst-canvas';
-    wrap.appendChild(canvas);
+    stage.appendChild(canvas);
   }
-  canvas.width  = size * state.dpr;
-  canvas.height = size * state.dpr;
-  canvas.style.width  = size + 'px';
-  canvas.style.height = size + 'px';
+  canvas.width  = state.chartSize * state.dpr;
+  canvas.height = state.chartSize * state.dpr;
+  canvas.style.width  = state.chartSize + 'px';
+  canvas.style.height = state.chartSize + 'px';
+  canvas.style.marginLeft = -(state.chartSize / 2) + 'px';
+  canvas.style.marginTop  = -(state.chartSize / 2) + 'px';
   state.canvas = canvas;
   state.ctx = canvas.getContext('2d');
   state.ctx.setTransform(1, 0, 0, 1, 0, 0);
   state.ctx.scale(state.dpr, state.dpr);
-  state.ctx.translate(size / 2, size / 2);
+  state.ctx.translate(state.chartSize / 2, state.chartSize / 2);
 
-  // SVG — testament + book + labels + interactions
-  let svg = wrap.querySelector('svg.sunburst');
+  // SVG — full chart-wrap rectangle (so labels can extend to screen edges)
+  let svg = stage.querySelector('svg.sunburst');
   if (!svg) {
-    svg = d3.select(wrap).append('svg').attr('class', 'sunburst').node();
+    svg = d3.select(stage).append('svg').attr('class', 'sunburst').node();
   }
   d3.select(svg)
-    .attr('viewBox', [-size/2, -size/2, size, size])
-    .attr('width', size).attr('height', size);
+    .attr('viewBox', [-w/2, -h/2, w, h])
+    .attr('width', w).attr('height', h)
+    .style('margin-left', -(w / 2) + 'px')
+    .style('margin-top',  -(h / 2) + 'px');
   state.svg = d3.select(svg);
   state.svg.selectAll('*').remove();
   state.g = state.svg.append('g');
@@ -377,24 +393,27 @@ function drawSvg() {
     .style('font-size', d => labelFontSize(d) + 'px')
     .text(d => bookLabel(d.data.name, state.lang, (d.x1 - d.x0) < 0.05));
 
-  // Leader-line labels for narrow books with vertical collision avoidance.
-  // Strategy: split into left/right half, sort by angle, then adjust Y so adjacent
-  // labels are at least MIN_GAP px apart.
+  // Leader-line labels for narrow books — ray-cast each label to the SVG
+  // viewBox edge along its centroid direction so they spread out across the
+  // full chart-wrap area, not just a tiny ring outside the chart.
   const leaders = g.append('g').attr('class', 'leaders');
-  const MIN_GAP = 13;
-  const labelR = RING.chapter * R + 28;     // radial distance of label baseline
+  const MIN_GAP = 14;
+  const xMax = state.svgW / 2 - 12;
+  const yMax = state.svgH / 2 - 12;
 
   const placed = narrow.map(d => {
     const a = (d.x0 + d.x1) / 2;
     const cosA = Math.cos(a - Math.PI/2);
     const sinA = Math.sin(a - Math.PI/2);
     const onRight = cosA >= 0;
+    // Project ray to nearest viewBox edge
+    const tx = Math.abs(cosA) > 1e-6 ? xMax / Math.abs(cosA) : Infinity;
+    const ty = Math.abs(sinA) > 1e-6 ? yMax / Math.abs(sinA) : Infinity;
+    const t = Math.min(tx, ty);
     return {
       d, a, cosA, sinA, onRight,
-      x: cosA * labelR,
-      y: sinA * labelR,
-      anchorX: cosA * (RING.chapter * R + 4),
-      anchorY: sinA * (RING.chapter * R + 4),
+      x: cosA * t,
+      y: sinA * t,
       origRadius: ((d.r0 + d.r1) / 2) * R,
       label: bookLabel(d.data.name, state.lang),
     };
@@ -414,24 +433,25 @@ function drawSvg() {
   });
 
   for (const p of placed) {
-    // Anchor point on chapter ring
+    // Anchor point on the chapter ring
     const ax = Math.cos(p.a - Math.PI/2) * (RING.chapter * R + 2);
     const ay = Math.sin(p.a - Math.PI/2) * (RING.chapter * R + 2);
-    // Bend point: same x as label, midway radially
-    const bx = p.onRight ? Math.max(ax, p.x - 18) : Math.min(ax, p.x + 18);
-    const by = p.y;
+    // Bend point: 60% of the way out, then horizontal to label
+    const mid = 0.55;
+    const bx = ax + (p.x - ax) * mid;
+    const by = ay + (p.y - ay) * mid;
     leaders.append('polyline')
       .attr('class', 'leader-line')
-      .attr('points', `${ax},${ay} ${bx},${by} ${p.x},${by}`)
+      .attr('points', `${ax},${ay} ${bx},${by} ${p.x},${p.y}`)
       .attr('fill', 'none')
       .attr('stroke', 'var(--fg-dim, #8a8472)')
-      .attr('stroke-width', 0.6);
+      .attr('stroke-width', 0.5);
     leaders.append('text')
       .attr('class', 'leader-label')
-      .attr('x', p.x + (p.onRight ? 4 : -4))
+      .attr('x', p.x + (p.onRight ? -4 : 4))
       .attr('y', p.y)
       .attr('dy', '0.32em')
-      .attr('text-anchor', p.onRight ? 'start' : 'end')
+      .attr('text-anchor', p.onRight ? 'end' : 'start')
       .text(p.label);
   }
 
@@ -784,6 +804,80 @@ function currentArcGen() {
 
 let currentReaderChapter = null;
 
+// ── Pinch / pan gestures ──────────────────────────────────
+
+function bindGestures() {
+  const wrap = $('.chart-wrap');
+  const stage = wrap.querySelector('.chart-stage');
+  if (!stage) return;
+  let pinchStart = 0;
+  let scaleStart = 1;
+  let panStart = null;
+  let suppressClick = false;
+
+  function applyTransform() {
+    stage.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.scale})`;
+  }
+
+  function resetTransform() {
+    state.scale = 1; state.panX = 0; state.panY = 0;
+    applyTransform();
+  }
+  state._resetTransform = resetTransform;
+
+  function dist(a, b) {
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  }
+
+  wrap.addEventListener('touchstart', e => {
+    if (e.touches.length === 2) {
+      pinchStart = dist(e.touches[0], e.touches[1]);
+      scaleStart = state.scale;
+      suppressClick = true;
+      e.preventDefault();
+    } else if (e.touches.length === 1 && state.scale > 1) {
+      panStart = { x: e.touches[0].clientX - state.panX, y: e.touches[0].clientY - state.panY };
+      suppressClick = true;
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  wrap.addEventListener('touchmove', e => {
+    if (e.touches.length === 2 && pinchStart) {
+      const d = dist(e.touches[0], e.touches[1]);
+      state.scale = Math.max(0.5, Math.min(6, scaleStart * d / pinchStart));
+      applyTransform();
+      e.preventDefault();
+    } else if (e.touches.length === 1 && panStart) {
+      state.panX = e.touches[0].clientX - panStart.x;
+      state.panY = e.touches[0].clientY - panStart.y;
+      applyTransform();
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  wrap.addEventListener('touchend', e => {
+    if (e.touches.length === 0) {
+      pinchStart = 0;
+      panStart = null;
+      // Allow taps again after a tick
+      setTimeout(() => { suppressClick = false; }, 50);
+    }
+  });
+
+  // Wheel zoom (desktop)
+  wrap.addEventListener('wheel', e => {
+    if (!e.ctrlKey && Math.abs(e.deltaY) < 4) return;  // ignore tiny scrolls
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.92 : 1.08;
+    state.scale = Math.max(0.5, Math.min(6, state.scale * factor));
+    applyTransform();
+  }, { passive: false });
+
+  // Click suppression check exposed via state
+  state._isSuppressed = () => suppressClick;
+}
+
 function bindControls() {
   $('#btn-lang').addEventListener('click', () => {
     state.lang = state.lang === 'en' ? 'zh' : 'en';
@@ -801,7 +895,10 @@ function bindControls() {
     // Force a full repaint so canvas picks up new CSS-variable colors
     requestAnimationFrame(() => render());
   });
-  $('#btn-reset').addEventListener('click', () => zoomTo(state.root));
+  $('#btn-reset').addEventListener('click', () => {
+    if (state._resetTransform) state._resetTransform();
+    zoomTo(state.root);
+  });
   $('#reader-close').addEventListener('click', closeReader);
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeReader();
