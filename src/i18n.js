@@ -4,8 +4,8 @@
 export const I18N = {
   ui: {
     en: {
-      title: 'The Bible — A Sunburst',
-      subtitle: '66 books · 1,189 chapters · 31,102 verses',
+      title: 'Radial Bible Index',
+      subtitle: 'A scripture navigator · 66 books · 1,189 chapters · 31,102 verses',
       lang: '中',
       theme: '☾',
       reset: 'Reset',
@@ -17,8 +17,8 @@ export const I18N = {
       bible: 'Bible',
     },
     zh: {
-      title: '圣经 · 旭日图',
-      subtitle: '66 卷 · 1,189 章 · 31,102 节',
+      title: '环形圣经目录',
+      subtitle: '便于查找经文的圣经文本导航 · 66 卷 · 1,189 章 · 31,102 节',
       lang: 'EN',
       theme: '☾',
       reset: '重置',
