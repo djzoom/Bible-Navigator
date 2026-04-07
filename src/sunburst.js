@@ -193,10 +193,21 @@ function render() {
   drawSvg();
 }
 
+function themeTokens() {
+  const cs = getComputedStyle(document.documentElement);
+  return {
+    tick:    cs.getPropertyValue('--tick-color').trim()     || 'rgba(0,0,0,0.55)',
+    chap:    cs.getPropertyValue('--chapter-stroke').trim() || 'rgba(0,0,0,0.85)',
+    book:    cs.getPropertyValue('--book-stroke').trim()    || 'rgba(0,0,0,0.95)',
+    ring:    cs.getPropertyValue('--ring-stroke').trim()    || 'rgba(0,0,0,0.55)',
+  };
+}
+
 function drawChapterCanvas() {
   const ctx = state.ctx, R = state.radius;
   const big = R * 2 + 200;
   ctx.clearRect(-big, -big, big * 2, big * 2);
+  const TK = themeTokens();
 
   const r0 = RING.book * R + 0.5;
   const r1 = RING.chapter * R;
@@ -222,7 +233,7 @@ function drawChapterCanvas() {
   const tickLen = Math.min(6, (r1 - r0) * 0.18);
   const tickInner = r1 - tickLen;
   ctx.lineWidth = 0.4;
-  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.strokeStyle = TK.tick;
   ctx.beginPath();
   for (const d of state.chapters) {
     const span = d.x1 - d.x0;
@@ -242,7 +253,7 @@ function drawChapterCanvas() {
 
   // ── 3. Chapter boundary lines (full radial, slightly thicker) ──
   ctx.lineWidth = 0.7;
-  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  ctx.strokeStyle = TK.chap;
   ctx.beginPath();
   for (let i = 0; i < state.chapters.length; i++) {
     const d = state.chapters[i];
@@ -260,7 +271,7 @@ function drawChapterCanvas() {
 
   // ── 4. Book boundary lines (strongest) ──
   ctx.lineWidth = 1.1;
-  ctx.strokeStyle = 'rgba(0,0,0,0.95)';
+  ctx.strokeStyle = TK.book;
   ctx.beginPath();
   const books = state.root.descendants().filter(n => n.depth === 3);
   for (const b of books) {
@@ -273,7 +284,7 @@ function drawChapterCanvas() {
 
   // ── 5. Outer & inner ring strokes ──
   ctx.lineWidth = 0.7;
-  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+  ctx.strokeStyle = TK.ring;
   ctx.beginPath();
   ctx.arc(0, 0, r1, 0, TAU);
   ctx.stroke();
@@ -304,26 +315,36 @@ function drawSvg() {
     .attr('class', d => 'arc depth-' + d.depth)
     .attr('d', arc)
     .attr('fill', d => d.depth === 1
-      ? (d.data.name === 'OT' ? '#3a2614' : '#10222e')
+      ? (d.data.name === 'OT' ? 'var(--ot-fill)' : 'var(--nt-fill)')
       : d.color)
     .attr('stroke', 'rgba(0,0,0,0.35)')
     .attr('stroke-width', 0.6)
     .style('cursor', 'pointer')
     .on('click', (_, d) => zoomTo(d));
 
-  // Group labels (depth 2)
+  // Group labels (depth 2) — curved if it fits, radial if narrow, leader-line if very narrow
+  const defs = g.append('defs');
   const groups = state.root.descendants().filter(d => d.depth === 2);
-  g.selectAll('text.group-label')
-    .data(groups)
-    .enter()
-    .append('text')
-    .attr('class', 'group-label')
-    .attr('transform', d => bookLabelTransform(d))
-    .attr('text-anchor', 'middle')
-    .attr('dy', '0.35em')
-    .style('font-size', d => Math.max(9, Math.min(11, labelFontSize(d) - 1)) + 'px')
-    .style('opacity', d => (d.x1 - d.x0) > 0.04 ? 1 : 0)
-    .text(d => groupLabel(d.data.group, state.lang));
+  const groupLeaders = [];
+  groups.forEach((d, i) => {
+    const text = groupLabel(d.data.group, state.lang);
+    const fitted = drawCurvedLabel(g, defs, d, R, `g-label-${i}`, 'group-label', 11, text);
+    if (fitted) return;
+    // Try radial label inside the arc
+    const arcLen = (d.x1 - d.x0) * ((d.r0 + d.r1) / 2) * R;
+    if (arcLen > 14) {
+      g.append('text')
+        .attr('class', 'group-label')
+        .attr('transform', bookLabelTransform(d))
+        .attr('text-anchor', 'middle')
+        .attr('dy', '0.35em')
+        .style('font-size', '10px')
+        .text(text);
+      return;
+    }
+    // Otherwise queue for an outside leader line
+    groupLeaders.push({ d, text });
+  });
 
   // Book labels — split into "in-arc" (wide) and "leader-line" (narrow). Depth 3.
   const books = state.root.descendants().filter(d => d.depth === 3);
@@ -400,23 +421,38 @@ function drawSvg() {
       .text(p.label);
   }
 
-  // Testament labels
+  // Testament labels (depth 1) — curved text along the arc
   const t = I18N.ui[state.lang];
-  g.selectAll('text.testament-label')
-    .data(state.root.descendants().filter(d => d.depth === 1))
-    .enter()
-    .append('text')
-    .attr('class', 'testament-label')
-    .attr('transform', d => {
-      const a = (d.x0 + d.x1)/2;
-      const r = ((RING.hub + RING.testament)/2) * R;
-      const deg = (a * 180/Math.PI) - 90;
-      const flip = (deg > 90 || deg < -90) ? 180 : 0;
-      return `rotate(${deg}) translate(${r},0) rotate(${flip})`;
-    })
-    .attr('text-anchor', 'middle')
-    .attr('dy', '0.35em')
-    .text(d => d.data.name === 'OT' ? t.ot : t.nt);
+  state.root.descendants().filter(d => d.depth === 1).forEach((d, i) => {
+    const text = d.data.name === 'OT' ? t.ot : t.nt;
+    drawCurvedLabel(g, defs, d, R, `t-label-${i}`, 'testament-label', 13, text);
+  });
+
+  // Group leader-line labels (for groups too narrow even for radial)
+  if (groupLeaders.length) {
+    const leadersG = g.append('g').attr('class', 'group-leaders');
+    groupLeaders.forEach(({ d, text }) => {
+      const a = (d.x0 + d.x1) / 2 - Math.PI / 2;
+      const cs = Math.cos(a), sn = Math.sin(a);
+      const r0p = ((d.r0 + d.r1) / 2) * R;
+      // Lead inward toward the testament ring's outer edge so it doesn't
+      // collide with book labels above.
+      const r1p = RING.testament * R + 2;
+      leadersG.append('line')
+        .attr('x1', cs * r0p).attr('y1', sn * r0p)
+        .attr('x2', cs * r1p).attr('y2', sn * r1p)
+        .attr('stroke', 'var(--fg-dim)')
+        .attr('stroke-width', 0.5);
+      leadersG.append('text')
+        .attr('class', 'group-label small')
+        .attr('x', cs * (r1p - 4))
+        .attr('y', sn * (r1p - 4))
+        .attr('text-anchor', cs >= 0 ? 'end' : 'start')
+        .attr('dominant-baseline', sn >= 0 ? 'hanging' : 'auto')
+        .style('font-size', '9px')
+        .text(text);
+    });
+  }
 
   // Center hub
   const center = g.append('g').attr('class', 'center-label');
@@ -439,6 +475,55 @@ function drawSvg() {
 
   // Mouse layer for canvas hit-testing
   bindCanvasHitTest();
+}
+
+// Draws a curved label that follows the arc centerline of a ring node.
+// Returns true if the label was actually drawn, false if it didn't fit.
+function drawCurvedLabel(g, defs, d, R, pathId, className, fontSize, text) {
+  const span = d.x1 - d.x0;
+  const r = ((d.r0 + d.r1) / 2) * R;
+  const arcLen = span * r;
+  // Rough text-width estimate; CJK chars are wider, ASCII narrower
+  const isCJK = /[\u3000-\u9fff]/.test(text);
+  const charW = isCJK ? fontSize * 1.05 : fontSize * 0.55;
+  const textW = text.length * charW;
+  if (arcLen < textW + 4) return false;
+
+  const midAngle = (d.x0 + d.x1) / 2;
+  // Top half of circle (12 o'clock to 6 o'clock through right) puts text upright
+  // when path goes counter-clockwise; bottom half needs reversed direction.
+  const isBottom = midAngle > Math.PI / 2 && midAngle < 3 * Math.PI / 2;
+
+  let a0, a1, sweep;
+  if (isBottom) {
+    a0 = d.x1 - Math.PI / 2;
+    a1 = d.x0 - Math.PI / 2;
+    sweep = 0;
+  } else {
+    a0 = d.x0 - Math.PI / 2;
+    a1 = d.x1 - Math.PI / 2;
+    sweep = 1;
+  }
+  const sx = Math.cos(a0) * r;
+  const sy = Math.sin(a0) * r;
+  const ex = Math.cos(a1) * r;
+  const ey = Math.sin(a1) * r;
+  const large = span > Math.PI ? 1 : 0;
+
+  defs.append('path')
+    .attr('id', pathId)
+    .attr('d', `M ${sx},${sy} A ${r},${r} 0 ${large} ${sweep} ${ex},${ey}`);
+
+  g.append('text')
+    .attr('class', className)
+    .style('font-size', fontSize + 'px')
+    .attr('dominant-baseline', 'central')
+    .append('textPath')
+    .attr('href', `#${pathId}`)
+    .attr('startOffset', '50%')
+    .attr('text-anchor', 'middle')
+    .text(text);
+  return true;
 }
 
 function bookLabelTransform(d) {
@@ -631,7 +716,8 @@ function bindControls() {
     const r = document.documentElement;
     r.classList.toggle('light');
     localStorage.setItem('bs-theme', r.classList.contains('light') ? 'light' : 'dark');
-    render();
+    // Force a full repaint so canvas picks up new CSS-variable colors
+    requestAnimationFrame(() => render());
   });
   $('#btn-reset').addEventListener('click', () => zoomTo(state.root));
   $('#reader-close').addEventListener('click', closeReader);
