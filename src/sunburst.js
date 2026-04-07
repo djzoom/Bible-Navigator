@@ -160,12 +160,18 @@ function setup() {
   const h = Math.max(320, wrap.clientHeight || window.innerHeight || 800);
   state.svgW = w;
   state.svgH = h;
-  // Chart fills the smaller dimension; the radius reserves a small margin
-  // and lets labels in the wider dimension fly out toward the screen edges.
+  // Chart sizing:
+  //   • Vertical: reserve only a tiny margin so the circle reaches close to
+  //     the top/bottom edge of the viewport (top labels stack along the
+  //     screen edge above the chart and we accept a small overlap).
+  //   • Horizontal: reserve enough room for ~one book name on each side so
+  //     leader-lines can pull narrow books (Ruth, Malachi, …) out to the
+  //     left/right edge legibly.
   const isMobile = w < 720 || h < 720;
-  const margin = isMobile ? 32 : 56;
-  state.chartSize = Math.min(w, h) - 16;
-  state.radius = (state.chartSize / 2) - margin;
+  const vMargin = isMobile ? 6 : 12;
+  const hMargin = isMobile ? 56 : 90;
+  state.radius = Math.min(w / 2 - hMargin, h / 2 - vMargin);
+  state.chartSize = state.radius * 2 + 4;
   state.dpr = window.devicePixelRatio || 1;
 
   // Canvas — chapter ring (square, sized to fit the chart)
