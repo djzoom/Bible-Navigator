@@ -319,12 +319,16 @@ function drawSvg() {
       : d.color)
     .attr('stroke', 'rgba(0,0,0,0.35)')
     .attr('stroke-width', 0.6)
+    .style('display', d => (d.x1 - d.x0) > 0.0005 ? null : 'none')
     .style('cursor', 'pointer')
     .on('click', (_, d) => zoomTo(d));
 
+  // Treat anything narrower than this (in radians) as "collapsed" — no label.
+  const VISIBLE_EPSILON = 0.001;
+
   // Group labels (depth 2) — curved if it fits, radial if narrow, leader-line if very narrow
   const defs = g.append('defs');
-  const groups = state.root.descendants().filter(d => d.depth === 2);
+  const groups = state.root.descendants().filter(d => d.depth === 2 && (d.x1 - d.x0) > VISIBLE_EPSILON);
   const groupLeaders = [];
   groups.forEach((d, i) => {
     const text = groupLabel(d.data.group, state.lang);
@@ -347,7 +351,8 @@ function drawSvg() {
   });
 
   // Book labels — split into "in-arc" (wide) and "leader-line" (narrow). Depth 3.
-  const books = state.root.descendants().filter(d => d.depth === 3);
+  // Skip books that are collapsed (their parent group is not in focus).
+  const books = state.root.descendants().filter(d => d.depth === 3 && (d.x1 - d.x0) > VISIBLE_EPSILON);
   const wide   = books.filter(d => (d.x1 - d.x0) >= LEADER_THRESHOLD);
   const narrow = books.filter(d => (d.x1 - d.x0) <  LEADER_THRESHOLD);
 
@@ -423,10 +428,12 @@ function drawSvg() {
 
   // Testament labels (depth 1) — curved text along the arc
   const t = I18N.ui[state.lang];
-  state.root.descendants().filter(d => d.depth === 1).forEach((d, i) => {
-    const text = d.data.name === 'OT' ? t.ot : t.nt;
-    drawCurvedLabel(g, defs, d, R, `t-label-${i}`, 'testament-label', 13, text);
-  });
+  state.root.descendants()
+    .filter(d => d.depth === 1 && (d.x1 - d.x0) > VISIBLE_EPSILON)
+    .forEach((d, i) => {
+      const text = d.data.name === 'OT' ? t.ot : t.nt;
+      drawCurvedLabel(g, defs, d, R, `t-label-${i}`, 'testament-label', 13, text);
+    });
 
   // Group leader-line labels (for groups too narrow even for radial)
   if (groupLeaders.length) {
