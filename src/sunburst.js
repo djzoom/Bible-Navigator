@@ -11,11 +11,21 @@ const LEADER_THRESHOLD = 0.022;
 const OT_GROUPS = ['Law', 'History', 'Wisdom', 'MajorProph', 'MinorProph'];
 const NT_GROUPS = ['Gospel', 'Acts', 'Pauline', 'General', 'Apoc'];
 
-// Color hues per book group
+// Color hues per book group — harmonized warm/cool split, low saturation
+// to avoid the "rainbow" effect.
+//   OT: warm earth tones, all in 12°–55° range (amber → mustard)
+//   NT: cool blue-greens, all in 188°–252° range (teal → indigo)
 const HUES = {
-  Law:        28, History:    42, Wisdom:     56, MajorProph: 14, MinorProph: 0,
-  Gospel:    200, Acts:      178, Pauline:   220, General:   258, Apoc:      292,
+  Law:        32, History:    42, Wisdom:     54, MajorProph: 18, MinorProph: 8,
+  Gospel:    202, Acts:      188, Pauline:   218, General:   234, Apoc:      252,
 };
+const SAT_GROUP   = 0.42;
+const LIGHT_GROUP = 0.36;
+const SAT_BOOK    = 0.46;
+const LIGHT_BOOK  = 0.50;
+const SAT_CHAP    = 0.42;
+const CHAP_LIGHT_LO = 0.38;
+const CHAP_LIGHT_HI = 0.66;
 
 const BOOK_GROUP = {
   'Genesis':'Law','Exodus':'Law','Leviticus':'Law','Numbers':'Law','Deuteronomy':'Law',
@@ -64,7 +74,9 @@ const TAU = Math.PI * 2;
 
 export async function init() {
   state.lang = localStorage.getItem('bs-lang') || 'en';
-  if (localStorage.getItem('bs-theme') === 'light') document.documentElement.classList.add('light');
+  // Always dark mode now — clear any legacy light setting.
+  document.documentElement.classList.remove('light');
+  localStorage.removeItem('bs-theme');
 
   const res = await fetch('./data/bible.json');
   state.data = await res.json();
@@ -130,24 +142,29 @@ function buildHierarchy() {
   state.focus = state.root;
 
   // Pre-compute colors
-  // Group ring: solid hue
+  // Group ring: solid hue (deepest)
   state.root.descendants().filter(d => d.depth === 2).forEach(d => {
     const hue = HUES[d.data.group] ?? 30;
-    d.color = d3.hsl(hue, 0.55, 0.36).toString();
+    d.color = d3.hsl(hue, SAT_GROUP, LIGHT_GROUP).toString();
   });
-  // Book ring: same hue, slightly lighter
+  // Book ring: same hue, mid lightness — slight per-book variation so adjacent
+  // books in the same group are still distinguishable.
   state.root.descendants().filter(d => d.depth === 3).forEach(d => {
-    const hue = HUES[d.parent.data.group] ?? 30;
-    d.color = d3.hsl(hue, 0.55, 0.46).toString();
+    const hue   = HUES[d.parent.data.group] ?? 30;
+    const sibs  = d.parent.children;
+    const idx   = sibs.indexOf(d);
+    const offset = (idx % 2 === 0 ? 0 : 0.04);  // tiny zig-zag
+    d.color = d3.hsl(hue, SAT_BOOK, LIGHT_BOOK + offset).toString();
   });
-  // Chapter ring: hue with lightness ramp by chapter index within book
+  // Chapter ring: clear lightness ramp from dark → light along chapter index
   state.chapters.forEach(d => {
     const book = d.parent;
     const hue  = HUES[book.parent.data.group] ?? 30;
     const idx  = book.children.indexOf(d);
     const tot  = book.children.length;
-    const l    = 0.45 + (idx / Math.max(1, tot - 1)) * 0.25;
-    d.color = d3.hsl(hue, 0.50, l).toString();
+    const t    = idx / Math.max(1, tot - 1);
+    const l    = CHAP_LIGHT_LO + t * (CHAP_LIGHT_HI - CHAP_LIGHT_LO);
+    d.color = d3.hsl(hue, SAT_CHAP, l).toString();
   });
 }
 
@@ -249,9 +266,9 @@ function drawChapterCanvas() {
   }
 
   // ── 2. Verse tick marks (short outer notches) ──
-  // Only drawn where angular spacing is ≥ ~0.8 px on the outer ring,
+  // Only drawn where angular spacing is ≥ ~1.4 px on the outer ring,
   // otherwise the lines collapse to a smear and waste cycles.
-  const minStep = 0.8 / r1;          // radians per pixel on outer ring
+  const minStep = 1.4 / r1;          // radians per pixel on outer ring
   const tickLen = Math.min(6, (r1 - r0) * 0.18);
   const tickInner = r1 - tickLen;
   ctx.lineWidth = 0.4;
@@ -339,8 +356,8 @@ function drawSvg() {
     .attr('fill', d => d.depth === 1
       ? (d.data.name === 'OT' ? 'var(--ot-fill)' : 'var(--nt-fill)')
       : d.color)
-    .attr('stroke', 'rgba(0,0,0,0.35)')
-    .attr('stroke-width', 0.6)
+    .attr('stroke', d => d.depth === 2 ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)')
+    .attr('stroke-width', d => d.depth === 2 ? 0.9 : 0.6)
     .style('display', d => (d.x1 - d.x0) > 0.0005 ? null : 'none')
     .style('cursor', 'pointer')
     .on('click', (_, d) => zoomTo(d));
@@ -388,11 +405,12 @@ function drawSvg() {
   });
 
   // In-arc labels for medium-wide books (oriented along arc tangent / radial)
+  const bookHanClass = state.lang === 'zh' ? ' han' : '';
   g.selectAll('text.book-label.radial')
     .data(radialBooks)
     .enter()
     .append('text')
-    .attr('class', 'book-label radial')
+    .attr('class', 'book-label radial' + bookHanClass)
     .attr('transform', d => bookLabelTransform(d))
     .attr('text-anchor', 'middle')
     .attr('dy', '0.35em')
@@ -498,16 +516,24 @@ function drawSvg() {
 
   // Center hub
   const center = g.append('g').attr('class', 'center-label');
+  const hubR = RING.hub * R - 1;
   center.append('circle')
-    .attr('r', RING.hub * R - 1)
+    .attr('r', hubR)
     .attr('fill', 'var(--bg-soft, #16161d)')
-    .attr('stroke', 'var(--border, #2a2a35)')
-    .attr('stroke-width', 1)
+    .attr('stroke', 'var(--accent)')
+    .attr('stroke-width', 1.2)
     .style('cursor', 'pointer')
     .on('click', () => zoomTo(state.root));
+  center.append('circle')
+    .attr('r', hubR - 4)
+    .attr('fill', 'none')
+    .attr('stroke', 'var(--accent)')
+    .attr('stroke-width', 0.4)
+    .attr('opacity', 0.5)
+    .style('pointer-events', 'none');
   center.append('text')
-    .attr('class', 'name')
-    .attr('y', 4)
+    .attr('class', 'name' + (state.lang === 'zh' ? ' han' : ''))
+    .attr('y', 6)
     .text(t.bible);
 
   // Hover layer (full SVG, polar hit-test)
@@ -530,8 +556,9 @@ const WIDE_ARC = Math.PI * 1.85;  // ~333°
 // Always renders and returns true.
 function drawHorizontalLabel(g, d, R, className, fontSize, text) {
   const r = ((d.r0 + d.r1) / 2) * R;
+  const han = state.lang === 'zh' ? ' han' : '';
   g.append('text')
-    .attr('class', className + ' horizontal')
+    .attr('class', className + ' horizontal' + han)
     .attr('x', 0)
     .attr('y', -r)
     .attr('text-anchor', 'middle')
@@ -580,8 +607,9 @@ function drawCurvedLabel(g, defs, d, R, pathId, className, fontSize, text) {
     .attr('id', pathId)
     .attr('d', `M ${sx},${sy} A ${r},${r} 0 ${large} ${sweep} ${ex},${ey}`);
 
+  const han = state.lang === 'zh' ? ' han' : '';
   g.append('text')
-    .attr('class', className)
+    .attr('class', className + han)
     .style('font-size', fontSize + 'px')
     .attr('dominant-baseline', 'central')
     .append('textPath')
@@ -895,13 +923,6 @@ function bindControls() {
     if (currentReaderChapter && $('#reader').classList.contains('open')) {
       openReader(currentReaderChapter);
     }
-  });
-  $('#btn-theme').addEventListener('click', () => {
-    const r = document.documentElement;
-    r.classList.toggle('light');
-    localStorage.setItem('bs-theme', r.classList.contains('light') ? 'light' : 'dark');
-    // Force a full repaint so canvas picks up new CSS-variable colors
-    requestAnimationFrame(() => render());
   });
   $('#btn-reset').addEventListener('click', () => {
     if (state._resetTransform) state._resetTransform();
