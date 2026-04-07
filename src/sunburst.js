@@ -684,18 +684,62 @@ function onLeave() {
 // ── Zoom ──────────────────────────────────────────────────
 
 function zoomTo(focus) {
-  if (!focus || focus === state.focus) {
-    if (state.focus !== state.root) focus = state.root;
-    else return;
+  if (!focus) return;
+  if (focus === state.focus) {
+    if (state.focus === state.root) return;
+    focus = state.root;
   }
   state.focus = focus;
 
+  // Snapshot current angles + compute targets
   const span = focus.X1 - focus.X0;
   state.root.each(d => {
-    d.x0 = Math.max(0, Math.min(1, (d.X0 - focus.X0) / span)) * TAU;
-    d.x1 = Math.max(0, Math.min(1, (d.X1 - focus.X0) / span)) * TAU;
+    d.sx0 = d.x0;
+    d.sx1 = d.x1;
+    d.tx0 = Math.max(0, Math.min(1, (d.X0 - focus.X0) / span)) * TAU;
+    d.tx1 = Math.max(0, Math.min(1, (d.X1 - focus.X0) / span)) * TAU;
   });
-  render();
+
+  // Hide labels & leaders during the transition for clarity (and perf)
+  state.g.selectAll('text, defs, .leaders, .group-leaders, polyline.leader-line')
+    .interrupt().style('opacity', 0);
+
+  if (state._anim) cancelAnimationFrame(state._anim);
+  const duration = 720;
+  const start = performance.now();
+
+  function ease(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
+
+  function frame(now) {
+    const e = ease(Math.min(1, (now - start) / duration));
+    state.root.each(d => {
+      d.x0 = d.sx0 + (d.tx0 - d.sx0) * e;
+      d.x1 = d.sx1 + (d.tx1 - d.sx1) * e;
+    });
+    // Update only the path geometry that already exists (no full re-render)
+    const arc = currentArcGen();
+    state.g.selectAll('path.arc').attr('d', arc);
+    drawChapterCanvas();
+    if (e < 1) {
+      state._anim = requestAnimationFrame(frame);
+    } else {
+      state._anim = null;
+      // Final pass: rebuild labels for the new layout
+      render();
+    }
+  }
+  state._anim = requestAnimationFrame(frame);
+}
+
+function currentArcGen() {
+  const R = state.radius;
+  return d3.arc()
+    .startAngle(d => d.x0)
+    .endAngle(d => d.x1)
+    .innerRadius(d => d.r0 * R)
+    .outerRadius(d => d.r1 * R)
+    .padAngle(d => d.depth === 1 ? 0.008 : (d.depth === 2 ? 0.004 : 0.002))
+    .padRadius(R);
 }
 
 // ── Controls ──────────────────────────────────────────────
