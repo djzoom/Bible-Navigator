@@ -356,12 +356,21 @@ function drawSvg() {
   const wide   = books.filter(d => (d.x1 - d.x0) >= LEADER_THRESHOLD);
   const narrow = books.filter(d => (d.x1 - d.x0) <  LEADER_THRESHOLD);
 
-  // In-arc labels for wide books (oriented along arc tangent)
-  g.selectAll('text.book-label')
-    .data(wide)
+  // Split wide books further: very wide ones get horizontal labels
+  // (typical when the user zoomed into a single book or its parent group)
+  const horizontalBooks = wide.filter(d => (d.x1 - d.x0) >= WIDE_ARC);
+  const radialBooks     = wide.filter(d => (d.x1 - d.x0) <  WIDE_ARC);
+
+  horizontalBooks.forEach(d => {
+    drawHorizontalLabel(g, d, R, 'book-label', 14, bookLabel(d.data.name, state.lang));
+  });
+
+  // In-arc labels for medium-wide books (oriented along arc tangent / radial)
+  g.selectAll('text.book-label.radial')
+    .data(radialBooks)
     .enter()
     .append('text')
-    .attr('class', 'book-label')
+    .attr('class', 'book-label radial')
     .attr('transform', d => bookLabelTransform(d))
     .attr('text-anchor', 'middle')
     .attr('dy', '0.35em')
@@ -484,10 +493,32 @@ function drawSvg() {
   bindCanvasHitTest();
 }
 
+// When the arc is this wide or wider, fall back to a single horizontal
+// label at the top of the ring band — much more readable than wrapping
+// the text around a half/full circle.
+const WIDE_ARC = Math.PI * 0.6;   // ~108°
+
+// Draws a horizontal label centered at the top of a node's ring band.
+// Always renders and returns true.
+function drawHorizontalLabel(g, d, R, className, fontSize, text) {
+  const r = ((d.r0 + d.r1) / 2) * R;
+  g.append('text')
+    .attr('class', className + ' horizontal')
+    .attr('x', 0)
+    .attr('y', -r)
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle')
+    .style('font-size', fontSize + 'px')
+    .text(text);
+  return true;
+}
+
 // Draws a curved label that follows the arc centerline of a ring node.
 // Returns true if the label was actually drawn, false if it didn't fit.
 function drawCurvedLabel(g, defs, d, R, pathId, className, fontSize, text) {
   const span = d.x1 - d.x0;
+  // Wide arc (e.g. zoomed-in ancestor) → horizontal label is more readable
+  if (span >= WIDE_ARC) return drawHorizontalLabel(g, d, R, className, fontSize, text);
   const r = ((d.r0 + d.r1) / 2) * R;
   const arcLen = span * r;
   // Rough text-width estimate; CJK chars are wider, ASCII narrower
