@@ -513,10 +513,12 @@ function drawSvg() {
   bindCanvasHitTest();
 }
 
-// When the arc is this wide or wider, fall back to a single horizontal
-// label at the top of the ring band — much more readable than wrapping
-// the text around a half/full circle.
-const WIDE_ARC = Math.PI * 0.6;   // ~108°
+// Only fall back to a horizontal label at the top of the ring band when an
+// arc spans (near-)full circle — i.e. it's the focused node or one of its
+// ancestors after a zoom. For merely "wide" arcs (e.g. Luke at ~110° once
+// you've zoomed into Gospels) we still want the label at the arc's actual
+// angular centroid via the radial / curved path, not pinned to 12 o'clock.
+const WIDE_ARC = Math.PI * 1.85;  // ~333°
 
 // Draws a horizontal label centered at the top of a node's ring band.
 // Always renders and returns true.
