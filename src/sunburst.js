@@ -6,7 +6,7 @@ import {
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, TAU, debounce,
   findByPath, pathOf,
-} from './shared.js?v=13';
+} from './shared.js?v=14';
 
 // Radial bands (fraction of overall radius)
 //   hub  →  testament  →  group  →  book  →  chapter
@@ -281,7 +281,7 @@ function createSunburstLayout() {
       .attr('text-anchor', 'middle')
       .attr('dy', '0.35em')
       .style('font-size', d => labelFontSize(d) + 'px')
-      .text(d => bookLabel(d.data.name, shared.lang, (d.x1 - d.x0) < 0.05));
+      .text(d => bookLabel(d.data.name, shared.lang));
 
     // Leader-line labels for narrow books
     const leaders = g.append('g').attr('class', 'leaders');
