@@ -117,13 +117,13 @@ export const I18N = {
   },
 };
 
-// Short labels for tight arcs (auto-derived: first 4 letters of EN, full ZH)
-export function bookLabel(name, lang, short = false) {
+// Full book name. The third argument is kept for backward compat but is
+// now ignored — we always return the full name so users don't have to
+// decipher abbreviations like "Deut." vs "Deu.".
+export function bookLabel(name, lang /*, _short */) {
   const entry = I18N.books[name];
   if (!entry) return name;
-  if (lang === 'zh') return entry.zh;
-  if (short) return entry.en.length > 6 ? entry.en.slice(0, 4) + '.' : entry.en;
-  return entry.en;
+  return lang === 'zh' ? entry.zh : entry.en;
 }
 
 export function groupLabel(key, lang) {

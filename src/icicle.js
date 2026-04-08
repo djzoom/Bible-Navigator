@@ -5,7 +5,7 @@ import {
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, tween,
   findByPath, pathOf,
-} from './shared.js?v=13';
+} from './shared.js?v=14';
 
 // Depth bands — identical to sunburst RING so every level takes up the same
 // fraction of the depth axis in both views.
@@ -324,18 +324,8 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
         .text(text);
       return;
     }
-    // Abbreviated horizontal fit for book labels
-    if (depth === 3 && d.rw >= fontSize * 2 + 4) {
-      const short = isCJK ? text.slice(0, 2) : text.slice(0, 3) + '.';
-      g.append('text')
-        .attr('class', `${labelClass(depth)}${hanClass}`)
-        .attr('x', cx)
-        .attr('y', cy)
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'middle')
-        .style('font-size', fontSize + 'px')
-        .text(short);
-    }
+    // If neither orientation fits the full name, skip the label entirely
+    // rather than showing an abbreviation — full names only.
   }
 
   function labelClass(depth) {
