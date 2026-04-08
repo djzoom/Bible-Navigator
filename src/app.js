@@ -1,17 +1,14 @@
 // App entry — loads data, wires up shared controls + layout switcher.
 import {
   state as shared, applyI18n, closeReader, refreshReaderIfOpen, $,
-} from './shared.js?v=2';
-import { sunburstLayout } from './sunburst.js?v=2';
-import { createIcicleLayout } from './icicle.js?v=2';
-import { createTreeLayout } from './tidytree.js?v=2';
+} from './shared.js?v=3';
+import { sunburstLayout } from './sunburst.js?v=3';
+import { createIcicleLayout } from './icicle.js?v=3';
+import { runMorph } from './morph.js?v=3';
 
 const layouts = {
   'sunburst': sunburstLayout,
   'icicle-v': createIcicleLayout('v'),
-  'icicle-h': createIcicleLayout('h'),
-  'tree-v':   createTreeLayout('v'),
-  'tree-h':   createTreeLayout('h'),
 };
 
 let active = null;
@@ -39,35 +36,55 @@ async function init() {
   });
 }
 
+let switching = false;
+
 async function switchTo(id, { immediate = false } = {}) {
   if (!layouts[id]) id = 'sunburst';
   if (active?.id === id) return;
+  if (switching) return;
+  switching = true;
 
-  if (!immediate && stage) {
-    stage.style.opacity = '0';
-    await new Promise(r => setTimeout(r, 160));
+  const fromId = active?.id;
+  const canMorph =
+    !immediate &&
+    (fromId === 'sunburst' || fromId === 'icicle-v') &&
+    (id === 'sunburst' || id === 'icicle-v');
+
+  if (canMorph && stage) {
+    // Unmount the current layout so its static SVG/canvas vanish; the morph
+    // canvas will carry the animation through the intermediate frames, then
+    // we mount the target layout at the end.
+    if (active) active.unmount();
+    active = null;
+    await runMorph(stage, fromId, id, 720);
+    active = layouts[id];
+    active.mount(stage);
+  } else {
+    if (!immediate && stage) {
+      stage.style.opacity = '0';
+      await new Promise(r => setTimeout(r, 160));
+    }
+    if (active) active.unmount();
+    active = layouts[id];
+    active.mount(stage);
+    if (!immediate && stage) {
+      requestAnimationFrame(() => {
+        stage.style.transition = 'opacity 0.2s ease';
+        stage.style.opacity = '1';
+      });
+    } else if (stage) {
+      stage.style.opacity = '1';
+    }
   }
-
-  if (active) active.unmount();
-  active = layouts[id];
-  active.mount(stage);
 
   document.querySelectorAll('.layout-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.layout === id));
 
-  if (!immediate && stage) {
-    // Force reflow then fade in
-    requestAnimationFrame(() => {
-      stage.style.transition = 'opacity 0.2s ease';
-      stage.style.opacity = '1';
-    });
-  } else if (stage) {
-    stage.style.opacity = '1';
-  }
-
   if (location.hash.slice(1) !== id) {
     history.replaceState(null, '', '#' + id);
   }
+
+  switching = false;
 }
 
 function bindControls() {
