@@ -13,14 +13,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preload" href="./data/bible.json" as="fetch" crossorigin>
   <link rel="preload" href="https://cdn.jsdelivr.net/npm/d3@7" as="script" crossorigin>
-  <link rel="modulepreload" href="./src/app.js?v=15">
-  <link rel="modulepreload" href="./src/shared.js?v=15">
-  <link rel="modulepreload" href="./src/sunburst.js?v=15">
-  <link rel="modulepreload" href="./src/icicle.js?v=15">
-  <link rel="modulepreload" href="./src/morph.js?v=15">
-  <link rel="modulepreload" href="./src/i18n.js?v=15">
+  <link rel="modulepreload" href="./src/app.js?v=19">
+  <link rel="modulepreload" href="./src/shared.js?v=19">
+  <link rel="modulepreload" href="./src/sunburst.js?v=19">
+  <link rel="modulepreload" href="./src/icicle.js?v=19">
+  <link rel="modulepreload" href="./src/morph.js?v=19">
+  <link rel="modulepreload" href="./src/i18n.js?v=19">
 
-  <link rel="stylesheet" href="src/styles.css">
+  <link rel="stylesheet" href="src/styles.css?v=19">
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;500;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -31,6 +31,10 @@
         <div class="subtitle" id="subtitle">A chapter-structure explorer · 66 books · 1,189 chapters · 31,102 verses</div>
       </div>
       <div class="controls">
+        <div class="layout-switcher" aria-label="Layout">
+          <button class="layout-btn active" data-layout="sunburst" title="Sunburst / 径向">⊙</button>
+          <button class="layout-btn" data-layout="icicle-v" title="Icicle Vertical / 矩纵">⬍</button>
+        </div>
         <button class="ctrl" id="btn-reset">Reset</button>
         <button class="ctrl" id="btn-lang">中</button>
       </div>
@@ -54,12 +58,7 @@
     <div class="reader-body" id="reader-body"></div>
   </aside>
 
-  <nav class="layout-switcher" aria-label="Layout">
-    <button class="layout-btn active" data-layout="sunburst" title="Sunburst / 径向">⊙</button>
-    <button class="layout-btn" data-layout="icicle-v" title="Icicle Vertical / 矩纵">⬍</button>
-  </nav>
-
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
-  <script type="module" src="./src/app.js?v=15"></script>
+  <script type="module" src="./src/app.js?v=19"></script>
 </body>
 </html>

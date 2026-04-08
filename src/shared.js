@@ -1,7 +1,7 @@
 // Shared primitives for all layouts: hierarchy build, colors, reader drawer,
 // lang state, gestures. Layout modules (sunburst / icicle / tidytree) each
 // import from here so they stay ~100% consistent on data + styling.
-import { I18N, bookLabel, groupLabel } from './i18n.js?v=15';
+import { I18N, bookLabel, groupLabel } from './i18n.js?v=19';
 
 // ── Canonical book groups ─────────────────────────────────
 
@@ -74,6 +74,28 @@ export function findByPath(root, path) {
 // expected by findByPath above.
 export function pathOf(node) {
   return node.ancestors().reverse().map(a => a.data.name);
+}
+
+// Rectangular-view band table used by BOTH icicle.js and morph.js so the
+// final icicle frame and the morph's intermediate frames have identical
+// depth layouts. Returns 6 absolute pixel positions where the bands
+// [hub, testament, group, book, chapter] begin and end.
+export function icicleBandPx(depthPx) {
+  const HUB_PX = 60;
+  const TESTAMENT_PX = 36;
+  const GROUP_PX = 48;
+  const BOOK_PX = 96;
+  const fixed = HUB_PX + TESTAMENT_PX + GROUP_PX + BOOK_PX;
+  const remainderChapter = Math.max(60, depthPx - fixed);
+  const total = fixed + remainderChapter;
+  const scale = depthPx / total;
+  const LB = [0];
+  LB[1] = LB[0] + HUB_PX * scale;
+  LB[2] = LB[1] + TESTAMENT_PX * scale;
+  LB[3] = LB[2] + GROUP_PX * scale;
+  LB[4] = LB[3] + BOOK_PX * scale;
+  LB[5] = depthPx;
+  return LB;
 }
 
 export const TAU = Math.PI * 2;

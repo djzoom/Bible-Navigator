@@ -3,16 +3,12 @@
 // vertices are interpolated between polar and rectangular positions.
 // At t=0 the chart looks exactly like the sunburst, at t=1 it looks exactly
 // like the icicle-v.
-import { state as shared, buildHierarchy, themeTokens, tween, TAU, findByPath } from './shared.js?v=15';
+import { state as shared, buildHierarchy, themeTokens, tween, TAU, findByPath, icicleBandPx } from './shared.js?v=19';
 
-// Exactly the same fractional bands as sunburst's RING — always absolute,
-// never rescaled for focus. Sunburst and icicle both keep these band values
-// when focused; they only stretch the breadth (angular / horizontal) axis.
-//   hub [0, .10) · testament [.10, .18) · group [.18, .30)
-//   book [.30, .58) · chapter [.58, 1.00]
-const BAND = [0, 0.10, 0.18, 0.30, 0.58, 1.00];
-const CHAPTER_INNER_D = BAND[4];   // 0.58
-const CHAPTER_OUTER_D = BAND[5];   // 1.00
+// Polar-view band fractions (matches sunburst RING).
+//   hub [0, .10) · testament [.10, .18) · group [.18, .26)
+//   book [.26, .62) · chapter [.62, 1.00]
+const POLAR_BAND = [0, 0.10, 0.18, 0.26, 0.62, 1.00];
 
 // Maximum angular step (radians) between two adjacent sample points on a
 // polygon boundary. 0.05 rad ≈ 2.9°, which renders as a smooth circle up
@@ -78,19 +74,30 @@ export function runMorph(stage, fromId, toId, duration = 700) {
     const hMargin = isMobile ? 14 : 22;
     const R = Math.min(w / 2 - hMargin, h / 2 - vMargin);
 
-    // Depth band lookup. Both layouts keep absolute BAND values, so all
-    // depths — even ancestors of the focus — render at their real radial
-    // fractions throughout the morph.
-    function bandD(absDepth, offset = 0) {
-      const idx = absDepth + offset;
-      if (idx < 0) return 0;
-      if (idx >= BAND.length) return 1;
-      return BAND[idx];
-    }
-
     // For vertical icicle: full width (W) and full height (H).
     const W = w;
     const H = h;
+
+    // Band tables used by the two endpoint layouts:
+    //   polarBand — fractions of radius R (sunburst)
+    //   rectBand  — absolute pixel positions along x axis (icicle-v)
+    // Morph interpolates between the corresponding inner/outer band
+    // positions for each node, so the final morph frame exactly matches
+    // the icicle's mount layout.
+    const rectBand = icicleBandPx(W);
+
+    function bandPolar(absDepth, offset = 0) {
+      const idx = absDepth + offset;
+      if (idx < 0) return 0;
+      if (idx >= POLAR_BAND.length) return 1;
+      return POLAR_BAND[idx];
+    }
+    function bandRect(absDepth, offset = 0) {
+      const idx = absDepth + offset;
+      if (idx < 0) return 0;
+      if (idx >= rectBand.length) return W;
+      return rectBand[idx];
+    }
 
     // Canvas overlay
     const canvas = document.createElement('canvas');
@@ -184,49 +191,55 @@ export function runMorph(stage, fromId, toId, duration = 700) {
       return { t, tx, ty, Gx, Gy, L, alpha, cubicScale };
     }
 
-    function blend(b, d, t) {
+    // blend takes TWO depth coordinates: dPolar and dRect. Both are in
+    // [0, 1] but refer to DIFFERENT physical scales.
+    //   dPolar — fraction of R (the sunburst's radius), e.g. 0.62 = book/chapter boundary
+    //   dRect  — fraction of W (the icicle's depth axis), e.g. rectBand[4]/W
+    // The blend interpolates the physical transverse distance between the
+    // two scales so the final frame lands exactly on the icicle's pixel
+    // layout while the first frame lands exactly on the sunburst's radial
+    // layout.
+    function blend(b, dPolar, dRect, t) {
       const S = tState(t);
       const { tx, ty, Gx, Gy, L, alpha, cubicScale } = S;
 
-      let arcX, arcY, transX, transY, transScale;
+      let arcX, arcY, transX, transY;
+      let transCap;  // rho if arc, Infinity if linear
 
       if (alpha < LINEAR_EPS) {
-        // Near t = 1 — treat the ref curve as a straight line from G in
-        // the tangent direction. The arc radius is "infinite" so the depth
-        // scale is just the cubic value (≈ W).
         const s = b * L;
         arcX = Gx + tx * s;
         arcY = Gy + ty * s;
-        // Transverse direction (toward where the hub ends up): rotate90CW(τ)
         transX = -ty;
         transY = tx;
-        transScale = cubicScale;
+        transCap = Infinity;
       } else {
         const rho = L / alpha;
-        // Arc center = G + ρ · rotate90CW(τ). In Y-down rotate90CW = (−y, x).
         const Cx = Gx + rho * -ty;
         const Cy = Gy + rho * tx;
-        // Angle from center C to G
         const phi0 = Math.atan2(Gy - Cy, Gx - Cx);
-        // Traverse along arc by arc-length s. Going clockwise in Y-down
-        // means the math angle INCREASES.
         const s = b * L;
         const phi = phi0 + s / rho;
         arcX = Cx + rho * Math.cos(phi);
         arcY = Cy + rho * Math.sin(phi);
-        // Transverse (inward) direction: from the arc point toward C.
         const dx = Cx - arcX;
         const dy = Cy - arcY;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
         transX = dx / dist;
         transY = dy / dist;
-        // The cubic was chosen so it stays under ρ on typical canvases, so
-        // there is no kink in scale'(t). The Math.min is a defensive safety
-        // net for extreme aspect ratios where the cubic could still cross C.
-        transScale = Math.min(cubicScale, rho);
+        transCap = rho;
       }
 
-      const offset = (1 - d) * transScale;
+      // Interpolate the transverse distance between polar and rect endpoints:
+      //   polar: (1 − dPolar) · R
+      //   rect:  (1 − dRect)  · W
+      const polarDist = (1 - dPolar) * R;
+      const rectDist  = (1 - dRect)  * W;
+      let offset = polarDist * (1 - t) + rectDist * t;
+      // Scale-correction: during the arc phase the cubicScale / transCap
+      // limit how far the offset can extend without crossing the arc's
+      // center. Clamp to stay inside.
+      if (offset > transCap) offset = transCap;
 
       return [
         arcX + transX * offset,
@@ -249,8 +262,11 @@ export function runMorph(stage, fromId, toId, duration = 700) {
     function nodePolygon(node, t) {
       const b0 = node._b0, b1 = node._b1;
       if (b1 == null || b1 - b0 < 1e-7) return null;
-      const d0 = bandD(node.depth, 0);
-      const d1 = bandD(node.depth, 1);
+      const dp0 = bandPolar(node.depth, 0);
+      const dp1 = bandPolar(node.depth, 1);
+      // Convert rect band pixel positions to [0, 1] fractions of W.
+      const dr0 = bandRect(node.depth, 0) / W;
+      const dr1 = bandRect(node.depth, 1) / W;
 
       // Dynamic sample count. S is captured in draw() but we don't have
       // it here; recompute alpha directly (cheap).
@@ -265,13 +281,13 @@ export function runMorph(stage, fromId, toId, duration = 700) {
       for (let i = 0; i <= samples; i++) {
         const s = i / samples;
         const b = b0 + (b1 - b0) * s;
-        pts.push(blend(b, d1, t));
+        pts.push(blend(b, dp1, dr1, t));
       }
       // Inner boundary (d0) in reverse
       for (let i = samples; i >= 0; i--) {
         const s = i / samples;
         const b = b0 + (b1 - b0) * s;
-        pts.push(blend(b, d0, t));
+        pts.push(blend(b, dp0, dr0, t));
       }
       return pts;
     }
@@ -306,10 +322,16 @@ export function runMorph(stage, fromId, toId, duration = 700) {
         }
       }
 
+      // Chapter-level band edges in both coord systems
+      const chapInnerPolar = POLAR_BAND[4];
+      const chapOuterPolar = POLAR_BAND[5];
+      const chapInnerRect  = rectBand[4] / W;
+      const chapOuterRect  = rectBand[5] / W;
+      // 18 % of the chapter band becomes verse ticks
+      const tickInnerPolar = chapOuterPolar - 0.18 * (chapOuterPolar - chapInnerPolar);
+      const tickInnerRect  = chapOuterRect  - 0.18 * (chapOuterRect  - chapInnerRect);
+
       // ── 5. Verse tick marks within each chapter ──
-      const chapInnerD = CHAPTER_INNER_D;
-      const chapBand = CHAPTER_OUTER_D - chapInnerD;
-      const tickInnerD = 1 - 0.18 * chapBand;
       ctx.lineWidth = 0.4;
       ctx.strokeStyle = TK.tick;
       ctx.beginPath();
@@ -317,14 +339,12 @@ export function runMorph(stage, fromId, toId, duration = 700) {
         const verses = c.value;
         if (verses < 2) continue;
         const span = c._b1 - c._b0;
-        // Skip if individual verses would be smaller than ~1.4 px on the
-        // outer edge of the ref curve (S.L · span is the outer arc length).
         const outerLen = S.L * span;
         if (outerLen / verses < 1.4) continue;
         for (let i = 1; i < verses; i++) {
           const bv = c._b0 + (i / verses) * span;
-          const [x0, y0] = blend(bv, tickInnerD, t);
-          const [x1, y1] = blend(bv, 1, t);
+          const [x0, y0] = blend(bv, tickInnerPolar, tickInnerRect, t);
+          const [x1, y1] = blend(bv, chapOuterPolar, chapOuterRect, t);
           ctx.moveTo(x0, y0);
           ctx.lineTo(x1, y1);
         }
@@ -339,9 +359,9 @@ export function runMorph(stage, fromId, toId, duration = 700) {
         const c0 = chapters[i];
         const c1 = chapters[i + 1];
         if (c1.parent !== c0.parent) continue;
-        const bb = c0._b1;  // shared local breadth
-        const [x0, y0] = blend(bb, chapInnerD, t);
-        const [x1, y1] = blend(bb, 1, t);
+        const bb = c0._b1;
+        const [x0, y0] = blend(bb, chapInnerPolar, chapInnerRect, t);
+        const [x1, y1] = blend(bb, chapOuterPolar, chapOuterRect, t);
         ctx.moveTo(x0, y0);
         ctx.lineTo(x1, y1);
       }
@@ -353,8 +373,8 @@ export function runMorph(stage, fromId, toId, duration = 700) {
       ctx.beginPath();
       for (const bk of books) {
         const bb = bk._b1;
-        const [x0, y0] = blend(bb, chapInnerD, t);
-        const [x1, y1] = blend(bb, 1, t);
+        const [x0, y0] = blend(bb, chapInnerPolar, chapInnerRect, t);
+        const [x1, y1] = blend(bb, chapOuterPolar, chapOuterRect, t);
         ctx.moveTo(x0, y0);
         ctx.lineTo(x1, y1);
       }

@@ -4,14 +4,15 @@ import {
   state, buildHierarchy, themeTokens,
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, tween,
-  findByPath, pathOf,
-} from './shared.js?v=15';
+  findByPath, pathOf, icicleBandPx,
+} from './shared.js?v=19';
 
-// Depth bands — identical to sunburst RING so every level takes up the same
-// fraction of the depth axis in both views.
-//   0=root hub [0, .10) · 1=testament [.10, .18) · 2=group [.18, .30)
-//   3=book [.30, .58)   · 4=chapter [.58, 1.0]
-const BAND = [0, 0.10, 0.18, 0.30, 0.58, 1.00];
+// Depth bands — identical to sunburst RING so every level takes up the
+// same fraction of the depth axis in both views. Book band is deliberately
+// wide so full book names have more radial room inline.
+//   0=root hub [0, .10) · 1=testament [.10, .18) · 2=group [.18, .26)
+//   3=book [.26, .62)   · 4=chapter [.62, 1.0]
+const BAND = [0, 0.10, 0.18, 0.26, 0.62, 1.00];
 
 export function createIcicleLayout(orientation /* 'v' | 'h' */) {
   // 'v' = books flow vertically (Genesis at top, Revelation at bottom),
@@ -124,19 +125,16 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
     const focusX0 = focus.X0, focusX1 = focus.X1, span = focusX1 - focusX0;
     const focusDepth = focus.depth;
 
-    // Match the sunburst's focus semantics: stretch the focus subtree's
-    // breadth to fill the breadth axis. DEPTH bands always use absolute
-    // BAND values so the levels above focus stay visible (as full-width
-    // strips), the focus itself is a full-width strip, and its descendants
-    // are subdivided beneath it — a direct rectangular analogue of the
-    // sunburst's behavior.
+    // The icicle uses a DIFFERENT depth layout from the sunburst. The
+    // shared icicleBandPx() helper is imported so morph.js can use the
+    // exact same layout during the transition frames.
+    const LB = icicleBandPx(depth);
+
     root.each(d => {
       const bx0 = (Math.max(0, Math.min(1, (d.X0 - focusX0) / span))) * breadth;
       const bx1 = (Math.max(0, Math.min(1, (d.X1 - focusX0) / span))) * breadth;
-      const raw0 = BAND[Math.max(0, d.depth)] ?? 0;
-      const raw1 = BAND[Math.max(0, d.depth + 1)] ?? 1;
-      const dy0 = raw0 * depth;
-      const dy1 = raw1 * depth;
+      const dy0 = LB[Math.max(0, d.depth)] ?? 0;
+      const dy1 = LB[Math.max(0, d.depth + 1)] ?? depth;
 
       d.bx0 = bx0; d.bx1 = bx1;
       d.dy0 = dy0; d.dy1 = dy1;
@@ -254,14 +252,19 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
       .style('cursor', 'pointer')
       .on('click', (_, d) => zoomTo(d));
 
-    // Testament + group labels: use the simple in-rect placement (they
-    // always have plenty of space).
+    // Filter out nodes that are collapsed to zero breadth by the focus —
+    // their bx0/bx1 both pin to 0 so rw/rh ≈ 0 and we must not draw
+    // their labels (else they all pile up at the top-left corner).
+    const VISIBLE_EPS = 0.5;
+    const visible = d => (d.rw > VISIBLE_EPS && d.rh > VISIBLE_EPS);
+
+    // Testament + group labels: use the simple in-rect placement.
     [1, 2].forEach(dep => {
-      const nodes = inner.filter(d => d.depth === dep);
-      nodes.forEach(d => drawLabel(d, dep));
+      inner.filter(d => d.depth === dep && visible(d))
+        .forEach(d => drawLabel(d, dep));
     });
-    // Book labels: collision-avoided so all 66 show and no two overlap.
-    drawBookLabels(inner.filter(d => d.depth === 3));
+    // Book labels: only for books actually visible in the current focus.
+    drawBookLabels(inner.filter(d => d.depth === 3 && visible(d)));
 
     // Hub (root) "Bible" label at top of stage
     const rootNode = root;

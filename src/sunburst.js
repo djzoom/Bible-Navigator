@@ -6,11 +6,13 @@ import {
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, TAU, debounce,
   findByPath, pathOf,
-} from './shared.js?v=15';
+} from './shared.js?v=19';
 
 // Radial bands (fraction of overall radius)
 //   hub  →  testament  →  group  →  book  →  chapter
-const RING = { hub: 0.10, testament: 0.18, group: 0.30, book: 0.58, chapter: 1.00 };
+// The book ring is intentionally the widest band so full-length book
+// names can fit radially without overflowing into the chapter ring.
+const RING = { hub: 0.10, testament: 0.18, group: 0.26, book: 0.62, chapter: 1.00 };
 
 // Threshold (radians) below which a book label gets a radial leader line outside the chart
 const LEADER_THRESHOLD = 0.022;
@@ -260,75 +262,128 @@ function createSunburstLayout() {
       groupLeaders.push({ d, text });
     });
 
-    // Book labels (depth 3)
-    const books = root.descendants().filter(d => d.depth === 3 && (d.x1 - d.x0) > VISIBLE_EPSILON);
-    const wide   = books.filter(d => (d.x1 - d.x0) >= LEADER_THRESHOLD);
-    const narrow = books.filter(d => (d.x1 - d.x0) <  LEADER_THRESHOLD);
-    const horizontalBooks = wide.filter(d => (d.x1 - d.x0) >= WIDE_ARC);
-    const radialBooks     = wide.filter(d => (d.x1 - d.x0) <  WIDE_ARC);
-
-    horizontalBooks.forEach(d => {
-      drawHorizontalLabel(g, d, R, 'book-label', 14, bookLabel(d.data.name, shared.lang));
-    });
+    // Book labels (depth 3) — inline placement now uses the book ring's
+    // RADIAL width as the text length axis. That's a much larger budget
+    // (~36 % of radius) than the narrow tangential slice we used before,
+    // so almost every Chinese book name can fit inline without leaders.
+    const allBooks = root.descendants().filter(d => d.depth === 3 && (d.x1 - d.x0) > VISIBLE_EPSILON);
 
     const bookHanClass = shared.lang === 'zh' ? ' han' : '';
+    const bookRingRadialWidth = (RING.book - RING.group) * R;
+
+    function canInlineInBookRing(d, text) {
+      const span = d.x1 - d.x0;
+      const midR = ((d.r0 + d.r1) / 2) * R;
+      const tanSpace = span * midR;         // text HEIGHT axis
+      const radSpace = bookRingRadialWidth;  // text LENGTH axis
+      const fontSize = labelFontSize(d);
+      // Need enough tangential space for the font size (no extra margin so
+      // tiny book wedges still qualify), and enough radial space for the
+      // text length.
+      if (tanSpace < fontSize * 0.95) return false;
+      const isCJK = /[\u3000-\u9fff]/.test(text);
+      const charW = isCJK ? fontSize * 1.0 : fontSize * 0.55;
+      const textW = text.length * charW;
+      return radSpace >= textW + 2;
+    }
+
+    const wide = [], narrow = [];
+    for (const d of allBooks) {
+      const text = bookLabel(d.data.name, shared.lang);
+      if ((d.x1 - d.x0) >= WIDE_ARC) {
+        drawHorizontalLabel(g, d, R, 'book-label', 14, text);
+      } else if (canInlineInBookRing(d, text)) {
+        wide.push({ d, text });
+      } else {
+        narrow.push(d);
+      }
+    }
+
     g.selectAll('text.book-label.radial')
-      .data(radialBooks)
+      .data(wide)
       .enter()
       .append('text')
       .attr('class', 'book-label radial' + bookHanClass)
-      .attr('transform', d => bookLabelTransform(d))
+      .attr('transform', ({ d }) => bookLabelTransform(d))
       .attr('text-anchor', 'middle')
       .attr('dy', '0.35em')
-      .style('font-size', d => labelFontSize(d) + 'px')
-      .text(d => bookLabel(d.data.name, shared.lang));
+      .style('font-size', ({ d }) => labelFontSize(d) + 'px')
+      .text(({ text }) => text);
 
-    // Leader-line labels for narrow books
+    // Leader-line labels — placed in the left or right gutter OUTSIDE
+    // the chapter ring, sorted by angle, and relaxed so no two labels
+    // touch each other or invade the chart interior.
     const leaders = g.append('g').attr('class', 'leaders');
-    const MIN_GAP = 14;
-    const xMax = svgW / 2 - 12;
-    const yMax = svgH / 2 - 12;
+    const MIN_GAP = 15;
+    const chapterOuterR = RING.chapter * R;
+    // Gutter x: just outside the chart. If the viewport is wider than
+    // the chart, let labels drift further out to the screen edge.
+    const gutterX = Math.max(chapterOuterR + 24, svgW / 2 - 110);
+    const yClamp = svgH / 2 - 10;
+    const leaderHan = shared.lang === 'zh' ? ' han' : '';
 
     const placed = narrow.map(d => {
       const a = (d.x0 + d.x1) / 2;
       const cosA = Math.cos(a - Math.PI/2);
       const sinA = Math.sin(a - Math.PI/2);
       const onRight = cosA >= 0;
-      const tx = Math.abs(cosA) > 1e-6 ? xMax / Math.abs(cosA) : Infinity;
-      const ty = Math.abs(sinA) > 1e-6 ? yMax / Math.abs(sinA) : Infinity;
-      const t = Math.min(tx, ty);
+      // Anchor: the node's centroid on the chapter ring outer edge
+      const ax = cosA * (chapterOuterR + 2);
+      const ay = sinA * (chapterOuterR + 2);
+      // Natural label Y: extend the (0,0)→(ax,ay) ray until it hits gutterX
+      let naturalY;
+      if (Math.abs(cosA) > 1e-6) {
+        naturalY = sinA * (gutterX / Math.abs(cosA));
+      } else {
+        naturalY = sinA > 0 ? yClamp : -yClamp;
+      }
+      // Clamp to viewBox
+      if (naturalY < -yClamp) naturalY = -yClamp;
+      if (naturalY >  yClamp) naturalY =  yClamp;
       return {
-        d, a, cosA, sinA, onRight,
-        x: cosA * t, y: sinA * t,
+        d, onRight,
+        ax, ay,
+        x: onRight ? gutterX : -gutterX,
+        y: naturalY,
         label: bookLabel(d.data.name, shared.lang),
       };
     });
 
+    // Relax each side's stack with 3 passes so dense clusters settle.
     ['right', 'left'].forEach(side => {
       const arr = placed.filter(p => (p.onRight ? 'right' : 'left') === side)
         .sort((a, b) => a.y - b.y);
-      for (let i = 1; i < arr.length; i++) {
-        if (arr[i].y - arr[i-1].y < MIN_GAP) arr[i].y = arr[i-1].y + MIN_GAP;
+      if (!arr.length) return;
+      for (let pass = 0; pass < 3; pass++) {
+        for (let i = 1; i < arr.length; i++) {
+          if (arr[i].y - arr[i - 1].y < MIN_GAP) {
+            arr[i].y = arr[i - 1].y + MIN_GAP;
+          }
+        }
+        for (let i = arr.length - 2; i >= 0; i--) {
+          if (arr[i + 1].y - arr[i].y < MIN_GAP) {
+            arr[i].y = arr[i + 1].y - MIN_GAP;
+          }
+        }
       }
-      for (let i = arr.length - 2; i >= 0; i--) {
-        if (arr[i+1].y - arr[i].y < MIN_GAP) arr[i].y = arr[i+1].y - MIN_GAP;
-      }
+      // Slide whole stack if it overflowed the viewBox edges
+      const topOverflow = (-yClamp) - arr[0].y;
+      if (topOverflow > 0) for (const p of arr) p.y += topOverflow;
+      const botOverflow = arr[arr.length - 1].y - yClamp;
+      if (botOverflow > 0) for (const p of arr) p.y -= botOverflow;
     });
 
     for (const p of placed) {
-      const ax = Math.cos(p.a - Math.PI/2) * (RING.chapter * R + 2);
-      const ay = Math.sin(p.a - Math.PI/2) * (RING.chapter * R + 2);
-      const mid = 0.55;
-      const bx = ax + (p.x - ax) * mid;
-      const by = ay + (p.y - ay) * mid;
+      // Polyline: anchor on chapter ring → vertical bend at label's Y → label
+      const bx = p.onRight ? Math.max(p.ax, p.x - 10) : Math.min(p.ax, p.x + 10);
       leaders.append('polyline')
         .attr('class', 'leader-line')
-        .attr('points', `${ax},${ay} ${bx},${by} ${p.x},${p.y}`)
+        .attr('points', `${p.ax},${p.ay} ${bx},${p.y} ${p.x},${p.y}`)
         .attr('fill', 'none')
         .attr('stroke', 'var(--fg-dim, #8a8472)')
         .attr('stroke-width', 0.5);
       leaders.append('text')
-        .attr('class', 'leader-label')
+        .attr('class', 'leader-label' + leaderHan)
         .attr('x', p.x + (p.onRight ? -4 : 4))
         .attr('y', p.y)
         .attr('dy', '0.32em')
@@ -458,17 +513,36 @@ function createSunburstLayout() {
     return true;
   }
 
+  // Book labels read RADIALLY — the text's length axis lies along the
+  // radius (from inner edge to outer edge of the book ring). This uses
+  // the book ring's full radial width (~36% of radius) for the label's
+  // LENGTH instead of the narrow tangential slice, so long Chinese
+  // names like "帖撒罗尼迦前书" can fit inline without leader lines.
+  //
+  // After `rotate(deg)`, the new +x axis points outward from the center
+  // along the node's centroid angle. `translate(r,0)` moves to the
+  // middle of the book ring. Drawing text with no further rotation
+  // places it horizontally in that rotated frame — which is radially
+  // outward in screen space. On the left half we add `rotate(180)` so
+  // characters still read "up" rather than upside-down.
   function bookLabelTransform(d) {
     const angle = (d.x0 + d.x1) / 2;
     const r = ((d.r0 + d.r1) / 2) * radius;
     const deg = (angle * 180 / Math.PI) - 90;
-    const flip = (deg > 90 || deg < -90) ? 180 : 0;
+    // deg is in (-90..270). Left half of circle = deg in (90..270).
+    const isLeftHalf = deg > 90 || deg < -90;
+    const flip = isLeftHalf ? 180 : 0;
     return `rotate(${deg}) translate(${r},0) rotate(${flip})`;
   }
 
+  // Book label font size. The LIMIT is now the tangential arc width
+  // (the short axis of the text box), not the radial length. We allow
+  // the text to shrink down to 7 px for very narrow books; below that,
+  // the sheer density of adjacent names is unreadable so the fit check
+  // will force them to leader lines.
   function labelFontSize(d) {
-    const arcLen = (d.x1 - d.x0) * ((d.r0 + d.r1) / 2) * radius;
-    return Math.max(8, Math.min(13, arcLen / 4));
+    const tanSpace = (d.x1 - d.x0) * ((d.r0 + d.r1) / 2) * radius;
+    return Math.max(7, Math.min(12, tanSpace * 0.85));
   }
 
   function nodeId(d) {
