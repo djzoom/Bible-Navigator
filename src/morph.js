@@ -3,7 +3,7 @@
 // vertices are interpolated between polar and rectangular positions.
 // At t=0 the chart looks exactly like the sunburst, at t=1 it looks exactly
 // like the icicle-v.
-import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=4';
+import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=5';
 
 // Same radial bands the sunburst layout uses (fractions of the "depth" axis).
 const BAND = [0, 0.10, 0.18, 0.30, 0.58, 1.00];
@@ -73,22 +73,52 @@ export function runMorph(stage, fromId, toId, duration = 700) {
     ctx.scale(dpr, dpr);
     ctx.translate(w / 2, h / 2);    // origin at center
 
-    // Fractional-position at (breadth b, depth d), blended between polar and rect
-    // t = 0 → polar (sunburst), t = 1 → rect (icicle-v: books on Y axis, depth on X axis)
+    // Two-phase morph from sunburst (t=0) to icicle-v (t=1):
     //
-    // In the icicle-v target, Genesis (b≈0) is at the top (y=-H/2) and
-    // Revelation (b≈1) is at the bottom (y=+H/2). The hub is on the left
-    // (x=-W/2) and chapters are on the right (x=+W/2).
+    //   Phase 1 — 0 ≤ t ≤ P1  (rotate the whole ring 90° clockwise)
+    //     Genesis slides from 12 o'clock to 3 o'clock, the ring stays a ring.
+    //
+    //   Phase 2 — P1 ≤ t ≤ 1  (the rope unrolls)
+    //     Genesis (b≈0) keeps its orientation and rises to the top of the
+    //     vertical list (y = -H/2). It has no extra winding.
+    //     Revelation (b≈1) spirals one full counter-clockwise turn before
+    //     settling at the bottom of the list (y = +H/2).
+    //     Books between Genesis and Revelation carry a wind amount that
+    //     scales linearly with their breadth b, so the rope visibly unrolls
+    //     from the Genesis end.
+    //
+    // Running t backwards (1 → 0) plays this exact motion in reverse, which
+    // is what the user described for icicle → sunburst: Revelation descends
+    // with a clockwise spiral until it rejoins Genesis at the top, forming
+    // the ring, and then the ring rotates 90° counter-clockwise.
+    const P1 = 0.30;
     function blend(b, d, t) {
-      // Polar: angle = b*TAU - π/2 (so b=0 → 12 o'clock), radius = d*R
-      const angle = b * TAU - Math.PI / 2;
+      const baseAngle = b * TAU - Math.PI / 2;  // Genesis at 12 o'clock
       const r = d * R;
-      const px = Math.cos(angle) * r;
-      const py = Math.sin(angle) * r;
-      // Rect: depth on X, breadth on Y
-      const rx = (d - 0.5) * W;
-      const ry = (b - 0.5) * H;
-      return [px + (rx - px) * t, py + (ry - py) * t];
+      const rectX = (d - 0.5) * W;  // depth on X axis
+      const rectY = (b - 0.5) * H;  // breadth on Y axis
+
+      if (t <= P1) {
+        const u = t / P1;
+        const angle = baseAngle + u * (Math.PI / 2);   // +π/2 = CW in Y-down
+        return [Math.cos(angle) * r, Math.sin(angle) * r];
+      }
+
+      const u = (t - P1) / (1 - P1);
+      const rotatedAngle = baseAngle + Math.PI / 2;    // matches phase-1 end
+      // Wind grows from 0 → -b·τ during phase 2.
+      // -b·τ in math angle = one full *counter-clockwise* visual turn for b=1.
+      const wind = -b * TAU * u;
+      const windAngle = rotatedAngle + wind;
+
+      const polarX = Math.cos(windAngle) * r;
+      const polarY = Math.sin(windAngle) * r;
+
+      // Blend the spiraling polar point toward the final rectangular slot.
+      return [
+        polarX * (1 - u) + rectX * u,
+        polarY * (1 - u) + rectY * u,
+      ];
     }
 
     // Build a polygon for an annular-sector node (sunburst chapter becomes

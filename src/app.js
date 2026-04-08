@@ -1,10 +1,10 @@
 // App entry — loads data, wires up shared controls + layout switcher.
 import {
   state as shared, applyI18n, closeReader, refreshReaderIfOpen, $,
-} from './shared.js?v=4';
-import { sunburstLayout } from './sunburst.js?v=4';
-import { createIcicleLayout } from './icicle.js?v=4';
-import { runMorph } from './morph.js?v=4';
+} from './shared.js?v=5';
+import { sunburstLayout } from './sunburst.js?v=5';
+import { createIcicleLayout } from './icicle.js?v=5';
+import { runMorph } from './morph.js?v=5';
 
 const layouts = {
   'sunburst': sunburstLayout,
@@ -56,7 +56,7 @@ async function switchTo(id, { immediate = false } = {}) {
     // we mount the target layout at the end.
     if (active) active.unmount();
     active = null;
-    await runMorph(stage, fromId, id, 720);
+    await runMorph(stage, fromId, id, 1100);
     active = layouts[id];
     active.mount(stage);
   } else {
