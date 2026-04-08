@@ -4,8 +4,8 @@
 export const I18N = {
   ui: {
     en: {
-      title: 'Radial Bible Index',
-      subtitle: 'A scripture navigator · 66 books · 1,189 chapters · 31,102 verses',
+      title: 'Bible Topology',
+      subtitle: 'A chapter-structure explorer · 66 books · 1,189 chapters · 31,102 verses',
       lang: '中',
       reset: 'Reset',
       hint: 'Hover a chapter for info · click a chapter to read · click a book to zoom',
@@ -16,8 +16,8 @@ export const I18N = {
       bible: 'Bible',
     },
     zh: {
-      title: '环形圣经目录',
-      subtitle: '便于查找经文的圣经文本导航 · 66 卷 · 1,189 章 · 31,102 节',
+      title: '圣经章节拓扑',
+      subtitle: '章节结构浏览器 · 66 卷 · 1,189 章 · 31,102 节',
       lang: 'EN',
       reset: '重置',
       hint: '悬停查看信息 · 点击章阅读经文 · 点击书放大',
