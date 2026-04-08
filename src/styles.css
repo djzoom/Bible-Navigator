@@ -149,9 +149,8 @@ svg.sunburst text {
   stroke-linejoin: round;
   user-select: none;
 }
-svg.sunburst text.leader-label {
-  stroke-width: 0;          /* leader labels live OUTSIDE arcs, no need for halo */
-}
+/* Leader labels inherit the same serif + halo as inline labels — the
+   user wants a single visual style across the whole chart. */
 
 svg.sunburst text.testament-label {
   fill: var(--fg);
@@ -181,10 +180,15 @@ svg.sunburst text.group-label.han {
 }
 
 svg.sunburst text.leader-label {
-  font-size: 10.5px;
-  fill: var(--fg);
-  font-family: var(--font-sans);
+  font-size: 11px;
+  fill: #f8f0d8;
+  font-family: var(--font-serif);
+  font-weight: 500;
   letter-spacing: 0.2px;
+}
+svg.sunburst text.leader-label.han {
+  font-family: var(--font-han);
+  letter-spacing: 1px;
 }
 svg.sunburst text.book-label {
   font-family: var(--font-serif);
@@ -327,28 +331,21 @@ body.reader-open .app { filter: brightness(0.85); }
 /* ── Layout switcher (bottom floating) ─────────────────── */
 
 .layout-switcher {
-  position: fixed;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-  display: flex;
+  display: inline-flex;
   gap: 2px;
-  padding: 4px;
-  background: rgba(20, 21, 28, 0.92);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  padding: 2px;
+  background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: 999px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
-  z-index: 150;
+  margin-right: 4px;
 }
 .layout-btn {
   background: transparent;
   border: 0;
   color: var(--fg-dim);
-  font-size: 18px;
-  width: 38px;
-  height: 38px;
+  font-size: 16px;
+  width: 30px;
+  height: 28px;
   border-radius: 999px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
@@ -356,6 +353,7 @@ body.reader-open .app { filter: brightness(0.85); }
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
 }
 .layout-btn:hover { color: var(--fg); }
 .layout-btn.active {
@@ -436,8 +434,8 @@ svg.tree-svg text.tree-chapter-label {
 }
 
 @media (max-width: 480px) {
-  .layout-switcher { bottom: 10px; padding: 3px; }
-  .layout-btn { width: 34px; height: 34px; font-size: 16px; }
+  .layout-switcher { padding: 2px; }
+  .layout-btn { width: 28px; height: 26px; font-size: 14px; }
 }
 
 /* ── Mobile / narrow viewport ──────────────────────────── */
