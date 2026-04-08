@@ -1,10 +1,10 @@
 // App entry — loads data, wires up shared controls + layout switcher.
 import {
   state as shared, applyI18n, closeReader, refreshReaderIfOpen, $,
-} from './shared.js';
-import { sunburstLayout } from './sunburst.js';
-import { createIcicleLayout } from './icicle.js';
-import { createTreeLayout } from './tidytree.js';
+} from './shared.js?v=2';
+import { sunburstLayout } from './sunburst.js?v=2';
+import { createIcicleLayout } from './icicle.js?v=2';
+import { createTreeLayout } from './tidytree.js?v=2';
 
 const layouts = {
   'sunburst': sunburstLayout,
