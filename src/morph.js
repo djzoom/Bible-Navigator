@@ -3,7 +3,7 @@
 // vertices are interpolated between polar and rectangular positions.
 // At t=0 the chart looks exactly like the sunburst, at t=1 it looks exactly
 // like the icicle-v.
-import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=10';
+import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=11';
 
 // Exactly the same fractional bands as sunburst's RING:
 //   hub  [0, 0.10)  ·  testament [0.10, 0.18)  ·  group [0.18, 0.30)
@@ -123,6 +123,16 @@ export function runMorph(stage, fromId, toId, duration = 700) {
 
     // All the t-dependent reference-curve constants. blend(b, d, t) and the
     // tick / boundary drawing code all read from this.
+    //
+    // The depth scale used to be min(linearScale, ρ). The hard min produced a
+    // visible kink in scale'(t) at the moment ρ caught up to linearScale (≈ t
+    // = 0.81 for W = 800, R = 300, H = 600), which read as a "stutter" in the
+    // middle of the morph. Replacing it with a cubic R + (W − R)·t³ keeps the
+    // depth scale strictly under ρ for the entire morph on typical canvases
+    // (max of (1−t)·t² · 2π·(W−R) ≈ 465 < H = 600), so no clamp is needed and
+    // scale(t) is C¹ everywhere. A defensive Math.min against ρ remains in
+    // case the canvas aspect is so extreme that the cubic would still cross
+    // the arc center.
     function tState(t) {
       const tangentAngle = t * Math.PI / 2;
       const tx = Math.cos(tangentAngle);
@@ -131,27 +141,29 @@ export function runMorph(stage, fromId, toId, duration = 700) {
       const Gy = -R * (1 - t) + (-H / 2) * t;          // -R → -H/2
       const L = 2 * Math.PI * R * (1 - t) + H * t;    // 2πR → H
       const alpha = 2 * Math.PI * (1 - t);             // 2π → 0
-      const linearScale = R * (1 - t) + W * t;
-      return { t, tx, ty, Gx, Gy, L, alpha, linearScale };
+      // Cubic ease-out for the depth scale: starts at R, ends at W, smooth
+      // first derivative throughout. R·(1−t³) + W·t³ = R + (W−R)·t³.
+      const cubicScale = R + (W - R) * t * t * t;
+      return { t, tx, ty, Gx, Gy, L, alpha, cubicScale };
     }
 
     function blend(b, d, t) {
       const S = tState(t);
-      const { tx, ty, Gx, Gy, L, alpha, linearScale } = S;
+      const { tx, ty, Gx, Gy, L, alpha, cubicScale } = S;
 
       let arcX, arcY, transX, transY, transScale;
 
       if (alpha < LINEAR_EPS) {
         // Near t = 1 — treat the ref curve as a straight line from G in
         // the tangent direction. The arc radius is "infinite" so the depth
-        // offset has no upper bound and we use the linear scale directly.
+        // scale is just the cubic value (≈ W).
         const s = b * L;
         arcX = Gx + tx * s;
         arcY = Gy + ty * s;
         // Transverse direction (toward where the hub ends up): rotate90CW(τ)
         transX = -ty;
         transY = tx;
-        transScale = linearScale;
+        transScale = cubicScale;
       } else {
         const rho = L / alpha;
         // Arc center = G + ρ · rotate90CW(τ). In Y-down rotate90CW = (−y, x).
@@ -171,13 +183,10 @@ export function runMorph(stage, fromId, toId, duration = 700) {
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
         transX = dx / dist;
         transY = dy / dist;
-        // Clamp the depth scale so the (1−d)·scale offset can never exceed
-        // ρ. Without this clamp, hub and testament points (large 1−d) would
-        // overshoot the arc center C and pop out on the OPPOSITE side of
-        // the canvas — visually crossing every other ring on the way. With
-        // the clamp the inner rings stay snug around C, so no polygon ever
-        // crosses another.
-        transScale = Math.min(linearScale, rho);
+        // The cubic was chosen so it stays under ρ on typical canvases, so
+        // there is no kink in scale'(t). The Math.min is a defensive safety
+        // net for extreme aspect ratios where the cubic could still cross C.
+        transScale = Math.min(cubicScale, rho);
       }
 
       const offset = (1 - d) * transScale;
