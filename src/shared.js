@@ -1,7 +1,7 @@
 // Shared primitives for all layouts: hierarchy build, colors, reader drawer,
 // lang state, gestures. Layout modules (sunburst / icicle / tidytree) each
 // import from here so they stay ~100% consistent on data + styling.
-import { I18N, bookLabel, groupLabel } from './i18n.js?v=7';
+import { I18N, bookLabel, groupLabel } from './i18n.js?v=8';
 
 // ── Canonical book groups ─────────────────────────────────
 
