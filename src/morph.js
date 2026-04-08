@@ -3,9 +3,12 @@
 // vertices are interpolated between polar and rectangular positions.
 // At t=0 the chart looks exactly like the sunburst, at t=1 it looks exactly
 // like the icicle-v.
-import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=6';
+import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=7';
 
-// Same radial bands the sunburst layout uses (fractions of the "depth" axis).
+// Exactly the same fractional bands as sunburst's RING:
+//   hub  [0, 0.10)  ·  testament [0.10, 0.18)  ·  group [0.18, 0.30)
+//   book [0.30, 0.58)  ·  chapter [0.58, 1.00]
+// Icicle uses the same numbers so the transition is proportionally seamless.
 const BAND = [0, 0.10, 0.18, 0.30, 0.58, 1.00];
 
 const POLY_SAMPLES = 10;  // number of sample points along the inner/outer arc
@@ -73,70 +76,35 @@ export function runMorph(stage, fromId, toId, duration = 700) {
     ctx.scale(dpr, dpr);
     ctx.translate(w / 2, h / 2);    // origin at center
 
-    // Morph choreography (t ∈ [0, 1]):
+    // Direct polar ↔ rectangular blend — no rigid rotation, no spin, no
+    // mirror flipping. Every node's position interpolates in a straight
+    // line between its sunburst coordinate and its icicle coordinate. The
+    // outer cubic ease makes the motion start and end gently so the
+    // topological change (ring opening up into a list) is continuous.
     //
-    //   Phase 1  [0, P1)  — rigid 90° CW rotation of the whole ring
-    //     Every chapter rotates as one body. Genesis slides from 12 o'clock
-    //     to 3 o'clock, Revelation rides along right next to it.
+    //   Genesis (b≈0, angle -π/2)  →  top of the vertical list (y = -H/2)
+    //   Middle book (b≈0.5, angle +π/2, bottom of sunburst)  →  middle (y = 0)
+    //   Revelation (b≈1, angle wraps to -π/2)  →  bottom of the list (y = +H/2)
     //
-    //   Phase 2  [P1, 1]  — the ring spins CCW while books peel off
-    //     The whole ring keeps rotating counter-clockwise at a constant rate
-    //     during phase 2 (exactly one full turn: -τ radians). On top of that
-    //     rotation, books "peel off" the ring onto the vertical list in the
-    //     same order they sit on the ring: Genesis (b=0) leaves first and
-    //     locks into y=-H/2, then Exodus, Leviticus, … and finally
-    //     Revelation (b=1), which rides the full turn of the spin before
-    //     sliding to y=+H/2.
+    // Because Genesis and Revelation share the same sunburst point (the
+    // seam at 12 o'clock) but different icicle destinations, the morph
+    // inherently separates them — that separation IS the topological
+    // change from a closed ring into an open line, and making every
+    // node's path a straight line is the shortest and smoothest way to
+    // show it.
     //
-    //   This preserves the correspondence: you can watch a single book
-    //   travel from its ring slot to its list slot without losing it, and
-    //   it matches the user's description ("Genesis keeps its orientation
-    //   and gradually rises; Revelation at the tail spins counter-clockwise
-    //   once and ends up at the bottom of the list").
-    //
-    //   Running t in reverse plays the mirror sequence: Revelation descends
-    //   while rotating clockwise and rejoins Genesis at the top, reforming
-    //   the ring, which then unrotates 90° CCW back to the sunburst.
-    const P1 = 0.30;
-    const TRANS_DURATION = 0.42;  // how long each individual book's peel-off takes
+    // Running t from 1 → 0 plays the reverse automatically: the line
+    // closes back into the ring.
     function blend(b, d, t) {
-      const baseAngle = b * TAU - Math.PI / 2;  // Genesis starts at 12 o'clock
+      const baseAngle = b * TAU - Math.PI / 2;     // Genesis at 12 o'clock
       const r = d * R;
+      const polarX = Math.cos(baseAngle) * r;
+      const polarY = Math.sin(baseAngle) * r;
       const rectX = (d - 0.5) * W;
       const rectY = (b - 0.5) * H;
-
-      // Phase 1 — rigid rotation
-      if (t <= P1) {
-        const u = t / P1;
-        const angle = baseAngle + u * (Math.PI / 2);  // +π/2 = visual CW in Y-down
-        return [Math.cos(angle) * r, Math.sin(angle) * r];
-      }
-
-      // Phase 2 — spinning unroll
-      const u = (t - P1) / (1 - P1);
-      const rotatedAngle = baseAngle + Math.PI / 2;    // position at end of phase 1
-
-      // 2a. Entire ring turns -τ radians over phase 2 (one full CCW turn)
-      const ringRotation = -u * TAU;
-      const spunAngle = rotatedAngle + ringRotation;
-      const spunX = Math.cos(spunAngle) * r;
-      const spunY = Math.sin(spunAngle) * r;
-
-      // 2b. Each book begins its individual peel-off at its own staggered
-      //     start time so that Genesis (b=0) leaves the ring first and
-      //     Revelation (b=1) leaves last. "Start" slides from 0 to
-      //     (1 − TRANS_DURATION) as b goes 0 → 1.
-      const transitionStart = b * (1 - TRANS_DURATION);
-      const raw = (u - transitionStart) / TRANS_DURATION;
-      const clamped = raw < 0 ? 0 : raw > 1 ? 1 : raw;
-      // Quintic ease-in-out so the peel-off looks like a confident glide
-      const tU = clamped < 0.5
-        ? 16 * clamped * clamped * clamped * clamped * clamped
-        : 1 - Math.pow(-2 * clamped + 2, 5) / 2;
-
       return [
-        spunX + (rectX - spunX) * tU,
-        spunY + (rectY - spunY) * tU,
+        polarX + (rectX - polarX) * t,
+        polarY + (rectY - polarY) * t,
       ];
     }
 

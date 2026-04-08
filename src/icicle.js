@@ -4,12 +4,13 @@ import {
   state, buildHierarchy, themeTokens,
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, tween,
-} from './shared.js?v=6';
+} from './shared.js?v=7';
 
-// Depth bands as fractions of the "depth" axis (top-to-bottom for vertical,
-// left-to-right for horizontal).
-//   0=root hub · 1=testament · 2=group · 3=book · 4=chapter
-const BAND = [0, 0.06, 0.16, 0.30, 0.58, 1.00];
+// Depth bands — identical to sunburst RING so every level takes up the same
+// fraction of the depth axis in both views.
+//   0=root hub [0, .10) · 1=testament [.10, .18) · 2=group [.18, .30)
+//   3=book [.30, .58)   · 4=chapter [.58, 1.0]
+const BAND = [0, 0.10, 0.18, 0.30, 0.58, 1.00];
 
 export function createIcicleLayout(orientation /* 'v' | 'h' */) {
   // 'v' = books flow vertically (Genesis at top, Revelation at bottom),
@@ -121,19 +122,24 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
     const focusX0 = focus.X0, focusX1 = focus.X1, span = focusX1 - focusX0;
     const focusDepth = focus.depth;
 
+    // When zoomed into a focus at depth F, stretch the visible depth band
+    // [BAND[F], 1] back onto the full depth axis, and hide anything shallower.
+    const bandMin = BAND[focusDepth];
+    const bandRange = 1 - bandMin;
+
     root.each(d => {
-      // Breadth = horizontal extent along "breadth axis" (x or y depending on orientation)
+      // Breadth along the book axis (x or y depending on orientation)
       const bx0 = (Math.max(0, Math.min(1, (d.X0 - focusX0) / span))) * breadth;
       const bx1 = (Math.max(0, Math.min(1, (d.X1 - focusX0) / span))) * breadth;
 
-      // Depth = which band along "depth axis"
-      // Each depth level occupies BAND[depth]..BAND[depth+1] of the full depth,
-      // but after zoom the focus subtree should fill the whole depth.
-      const i0 = Math.max(0, d.depth - focusDepth);
-      const i1 = Math.max(0, d.depth - focusDepth + 1);
-      const maxI = 5 - focusDepth;  // 5 is total depth count (0..4 inclusive)
-      const dy0 = (i0 / maxI) * depth;
-      const dy1 = (i1 / maxI) * depth;
+      // Depth using the BAND proportions (same fractions as the sunburst).
+      // If d is shallower than the focus it collapses to zero width.
+      const raw0 = BAND[Math.max(0, d.depth)];
+      const raw1 = BAND[Math.max(0, d.depth + 1)] ?? 1;
+      const fr0 = Math.max(0, Math.min(1, (raw0 - bandMin) / bandRange));
+      const fr1 = Math.max(0, Math.min(1, (raw1 - bandMin) / bandRange));
+      const dy0 = fr0 * depth;
+      const dy1 = fr1 * depth;
 
       d.bx0 = bx0; d.bx1 = bx1;
       d.dy0 = dy0; d.dy1 = dy1;
