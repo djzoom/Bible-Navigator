@@ -3,7 +3,7 @@
 // vertices are interpolated between polar and rectangular positions.
 // At t=0 the chart looks exactly like the sunburst, at t=1 it looks exactly
 // like the icicle-v.
-import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=9';
+import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=10';
 
 // Exactly the same fractional bands as sunburst's RING:
 //   hub  [0, 0.10)  ·  testament [0.10, 0.18)  ·  group [0.18, 0.30)
@@ -120,22 +120,26 @@ export function runMorph(stage, fromId, toId, duration = 700) {
     // Running t backwards plays the mirror motion automatically: the
     // vertical line gently curls back into the ring.
     const LINEAR_EPS = 0.002;  // switch to straight-line formula when α drops below this
-    function blend(b, d, t) {
-      // Reference curve parameters
-      const tangentAngle = t * Math.PI / 2;        // 0 → π/2 (east → south)
+
+    // All the t-dependent reference-curve constants. blend(b, d, t) and the
+    // tick / boundary drawing code all read from this.
+    function tState(t) {
+      const tangentAngle = t * Math.PI / 2;
       const tx = Math.cos(tangentAngle);
       const ty = Math.sin(tangentAngle);
+      const Gx = (0.5 * W) * t;                       // 0 → 0.5·W
+      const Gy = -R * (1 - t) + (-H / 2) * t;          // -R → -H/2
+      const L = 2 * Math.PI * R * (1 - t) + H * t;    // 2πR → H
+      const alpha = 2 * Math.PI * (1 - t);             // 2π → 0
+      const linearScale = R * (1 - t) + W * t;
+      return { t, tx, ty, Gx, Gy, L, alpha, linearScale };
+    }
 
-      // Starting point G(t) of the reference curve (Genesis, at outer ring d=1)
-      const Gx = 0 * (1 - t) + (0.5 * W) * t;      // 0 → 0.5·W
-      const Gy = -R * (1 - t) + (-H / 2) * t;      // -R → -H/2
-
-      // Length, subtended angle, radius
-      const L = 2 * Math.PI * R * (1 - t) + H * t;  // 2πR → H
-      const alpha = 2 * Math.PI * (1 - t);           // 2π → 0
+    function blend(b, d, t) {
+      const S = tState(t);
+      const { tx, ty, Gx, Gy, L, alpha, linearScale } = S;
 
       let arcX, arcY, transX, transY, transScale;
-      const linearScale = R * (1 - t) + W * t;
 
       if (alpha < LINEAR_EPS) {
         // Near t = 1 — treat the ref curve as a straight line from G in
@@ -222,6 +226,7 @@ export function runMorph(stage, fromId, toId, duration = 700) {
     function draw(t) {
       ctx.clearRect(-w, -h, w * 2, h * 2);
       const TK = themeTokens();
+      const S = tState(t);  // shared with tick / boundary code below
 
       // Draw from deepest ring outward so the hub stays on top.
       // Actually draw from shallowest to deepest so chapters are on top.
@@ -239,7 +244,69 @@ export function runMorph(stage, fromId, toId, duration = 700) {
       // Chapter (4)
       for (const d of chapters) drawPolygon(nodePolygon(d, t), d.color);
 
-      // Subtle strokes between groups / books to preserve hierarchy legibility
+      // ── 5. Verse tick marks within each chapter ──
+      // The chapter ring's "明暗" (brightness) variation in both the sunburst
+      // and the icicle final views comes from a combination of the per-chapter
+      // lightness ramp AND thin verse tick lines across the outer ~18 % of
+      // each chapter cell. Without these ticks the morph's mid-frames lose
+      // the textured striping that makes the outer ring read as detailed.
+      const chapBand = 1 - BAND[4];
+      const tickInnerD = 1 - 0.18 * chapBand;
+      ctx.lineWidth = 0.4;
+      ctx.strokeStyle = TK.tick;
+      ctx.beginPath();
+      for (const c of chapters) {
+        const verses = c.value;
+        if (verses < 2) continue;
+        const span = c.x1 - c.x0;
+        // Skip if individual verses would be smaller than ~1.4 px on the
+        // outer edge of the ref curve (S.L · span is the outer arc length).
+        const outerLen = S.L * span;
+        if (outerLen / verses < 1.4) continue;
+        for (let i = 1; i < verses; i++) {
+          const bv = c.x0 + (i / verses) * span;
+          const [x0, y0] = blend(bv, tickInnerD, t);
+          const [x1, y1] = blend(bv, 1, t);
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x1, y1);
+        }
+      }
+      ctx.stroke();
+
+      // ── 6. Chapter boundary lines (within the same book) ──
+      // Same role as in sunburst.js / icicle.js: a slightly thicker stroke
+      // between adjacent chapters of the same book.
+      ctx.lineWidth = 0.7;
+      ctx.strokeStyle = TK.chap;
+      ctx.beginPath();
+      for (let i = 0; i < chapters.length - 1; i++) {
+        const c0 = chapters[i];
+        const c1 = chapters[i + 1];
+        if (c1.parent !== c0.parent) continue;
+        const bb = c0.x1;  // shared breadth
+        const [x0, y0] = blend(bb, BAND[4], t);
+        const [x1, y1] = blend(bb, 1, t);
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+      }
+      ctx.stroke();
+
+      // ── 7. Book boundary lines (across the chapter band only) ──
+      // Strongest separator: the line between two adjacent books inside the
+      // chapter ring.
+      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = TK.book;
+      ctx.beginPath();
+      for (const bk of books) {
+        const bb = bk.x1;
+        const [x0, y0] = blend(bb, BAND[4], t);
+        const [x1, y1] = blend(bb, 1, t);
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+      }
+      ctx.stroke();
+
+      // ── 8. Outline each book polygon for hierarchy legibility ──
       ctx.lineWidth = 0.8;
       ctx.strokeStyle = TK.book;
       for (const b of books) {
