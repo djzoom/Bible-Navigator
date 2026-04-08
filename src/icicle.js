@@ -4,7 +4,7 @@ import {
   state, buildHierarchy, themeTokens,
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, tween,
-} from './shared.js?v=3';
+} from './shared.js?v=4';
 
 // Depth bands as fractions of the "depth" axis (top-to-bottom for vertical,
 // left-to-right for horizontal).
@@ -12,8 +12,11 @@ import {
 const BAND = [0, 0.06, 0.16, 0.30, 0.58, 1.00];
 
 export function createIcicleLayout(orientation /* 'v' | 'h' */) {
-  const isVertical = orientation === 'v';
-  const id = isVertical ? 'icicle-v' : 'icicle-h';
+  // 'v' = books flow vertically (Genesis at top, Revelation at bottom),
+  //       hierarchy depth runs left→right (Bible hub on the left).
+  // 'h' = books flow horizontally, depth runs top→bottom.
+  const booksVertical = orientation === 'v';
+  const id = booksVertical ? 'icicle-v' : 'icicle-h';
 
   // Per-layout state
   let root, chapters;
@@ -55,8 +58,9 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
     H = Math.max(320, stage.clientHeight || window.innerHeight || 800);
     dpr = window.devicePixelRatio || 1;
 
-    breadth = isVertical ? W : H;
-    depth   = isVertical ? H : W;
+    // booksVertical: breadth (book axis) is vertical, hierarchy depth is horizontal
+    breadth = booksVertical ? H : W;
+    depth   = booksVertical ? W : H;
 
     // Canvas for chapter rectangles
     if (!canvas) {
@@ -95,9 +99,11 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
   }
 
   // Convert a (breadth, depth) coordinate into an (x, y) screen coordinate.
+  //   booksVertical = true  → depth on X axis, breadth on Y axis
+  //   booksVertical = false → breadth on X axis, depth on Y axis
   function toXY(b0, b1, d0, d1) {
-    if (isVertical) return { x: b0, y: d0, w: b1 - b0, h: d1 - d0 };
-    return            { x: d0, y: b0, w: d1 - d0, h: b1 - b0 };
+    if (booksVertical) return { x: d0, y: b0, w: d1 - d0, h: b1 - b0 };
+    return               { x: b0, y: d0, w: b1 - b0, h: d1 - d0 };
   }
 
   // Run partition and stamp each node with its pixel-space rectangle.
@@ -159,26 +165,28 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
     ctx.strokeStyle = TK.tick;
     ctx.beginPath();
     for (const d of chapters) {
-      const bLen = isVertical ? d.rw : d.rh;
+      // breadth axis is the book direction; in booksVertical mode that's Y
+      const bLen = booksVertical ? d.rh : d.rw;
       const verses = d.value;
       if (verses < 2 || bLen < 2) continue;
       const step = bLen / verses;
       if (step < 1.4) continue;
       for (let i = 1; i < verses; i++) {
-        if (isVertical) {
-          const x = d.rx + step * i;
-          ctx.moveTo(x, d.ry + d.rh * 0.82);
-          ctx.lineTo(x, d.ry + d.rh);
-        } else {
+        if (booksVertical) {
+          // ticks are horizontal lines at varying y, drawn near the far edge of the chapter
           const y = d.ry + step * i;
           ctx.moveTo(d.rx + d.rw * 0.82, y);
           ctx.lineTo(d.rx + d.rw, y);
+        } else {
+          const x = d.rx + step * i;
+          ctx.moveTo(x, d.ry + d.rh * 0.82);
+          ctx.lineTo(x, d.ry + d.rh);
         }
       }
     }
     ctx.stroke();
 
-    // 3. Chapter boundary lines inside same book
+    // 3. Chapter boundary lines inside same book (perpendicular to breadth)
     ctx.lineWidth = 0.7;
     ctx.strokeStyle = TK.chap;
     ctx.beginPath();
@@ -186,14 +194,15 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
       const d = chapters[i];
       const next = chapters[i + 1];
       if (next.parent !== d.parent) continue;
-      if (isVertical) {
-        const x = d.rx + d.rw;
-        ctx.moveTo(x, d.ry);
-        ctx.lineTo(x, d.ry + d.rh);
-      } else {
+      if (booksVertical) {
+        // separator between consecutive chapters is a horizontal line at y = end of chapter
         const y = d.ry + d.rh;
         ctx.moveTo(d.rx, y);
         ctx.lineTo(d.rx + d.rw, y);
+      } else {
+        const x = d.rx + d.rw;
+        ctx.moveTo(x, d.ry);
+        ctx.lineTo(x, d.ry + d.rh);
       }
     }
     ctx.stroke();
@@ -205,14 +214,14 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
     const books = root.descendants().filter(n => n.depth === 3);
     for (const b of books) {
       if (b.rw <= 0 || b.rh <= 0) continue;
-      if (isVertical) {
-        const x = b.rx + b.rw;
-        ctx.moveTo(x, b.ry);
-        ctx.lineTo(x, b.ry + b.rh);
-      } else {
+      if (booksVertical) {
         const y = b.ry + b.rh;
         ctx.moveTo(b.rx, y);
         ctx.lineTo(b.rx + b.rw, y);
+      } else {
+        const x = b.rx + b.rw;
+        ctx.moveTo(x, b.ry);
+        ctx.lineTo(x, b.ry + b.rh);
       }
     }
     ctx.stroke();
@@ -407,7 +416,7 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
 
   return {
     id,
-    label: isVertical
+    label: booksVertical
       ? { en: 'Icicle V', zh: '矩纵' }
       : { en: 'Icicle H', zh: '矩横' },
     mount, unmount, onLangChange,

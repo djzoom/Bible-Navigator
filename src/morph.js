@@ -3,7 +3,7 @@
 // vertices are interpolated between polar and rectangular positions.
 // At t=0 the chart looks exactly like the sunburst, at t=1 it looks exactly
 // like the icicle-v.
-import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=3';
+import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=4';
 
 // Same radial bands the sunburst layout uses (fractions of the "depth" axis).
 const BAND = [0, 0.10, 0.18, 0.30, 0.58, 1.00];
@@ -74,16 +74,20 @@ export function runMorph(stage, fromId, toId, duration = 700) {
     ctx.translate(w / 2, h / 2);    // origin at center
 
     // Fractional-position at (breadth b, depth d), blended between polar and rect
-    // t = 0 → polar (sunburst), t = 1 → rect (icicle-v)
+    // t = 0 → polar (sunburst), t = 1 → rect (icicle-v: books on Y axis, depth on X axis)
+    //
+    // In the icicle-v target, Genesis (b≈0) is at the top (y=-H/2) and
+    // Revelation (b≈1) is at the bottom (y=+H/2). The hub is on the left
+    // (x=-W/2) and chapters are on the right (x=+W/2).
     function blend(b, d, t) {
-      // Polar: angle = b*TAU, radius = d*R
+      // Polar: angle = b*TAU - π/2 (so b=0 → 12 o'clock), radius = d*R
       const angle = b * TAU - Math.PI / 2;
       const r = d * R;
       const px = Math.cos(angle) * r;
       const py = Math.sin(angle) * r;
-      // Rect:  x = (b-0.5)*W,  y = (d-0.5)*H
-      const rx = (b - 0.5) * W;
-      const ry = (d - 0.5) * H;
+      // Rect: depth on X, breadth on Y
+      const rx = (d - 0.5) * W;
+      const ry = (b - 0.5) * H;
       return [px + (rx - px) * t, py + (ry - py) * t];
     }
 
