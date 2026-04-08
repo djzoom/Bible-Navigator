@@ -3,7 +3,7 @@
 // vertices are interpolated between polar and rectangular positions.
 // At t=0 the chart looks exactly like the sunburst, at t=1 it looks exactly
 // like the icicle-v.
-import { state as shared, buildHierarchy, themeTokens, tween, TAU, findByPath } from './shared.js?v=14';
+import { state as shared, buildHierarchy, themeTokens, tween, TAU, findByPath } from './shared.js?v=15';
 
 // Exactly the same fractional bands as sunburst's RING — always absolute,
 // never rescaled for focus. Sunburst and icicle both keep these band values

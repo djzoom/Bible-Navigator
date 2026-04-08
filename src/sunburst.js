@@ -6,7 +6,7 @@ import {
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, TAU, debounce,
   findByPath, pathOf,
-} from './shared.js?v=14';
+} from './shared.js?v=15';
 
 // Radial bands (fraction of overall radius)
 //   hub  →  testament  →  group  →  book  →  chapter
