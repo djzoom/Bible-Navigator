@@ -4,7 +4,7 @@ import {
   state, buildHierarchy, themeTokens,
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, tween,
-} from './shared.js?v=10';
+} from './shared.js?v=11';
 
 // Depth bands — identical to sunburst RING so every level takes up the same
 // fraction of the depth axis in both views.

@@ -1,10 +1,10 @@
 // App entry — loads data, wires up shared controls + layout switcher.
 import {
   state as shared, applyI18n, closeReader, refreshReaderIfOpen, $,
-} from './shared.js?v=10';
-import { sunburstLayout } from './sunburst.js?v=10';
-import { createIcicleLayout } from './icicle.js?v=10';
-import { runMorph } from './morph.js?v=10';
+} from './shared.js?v=11';
+import { sunburstLayout } from './sunburst.js?v=11';
+import { createIcicleLayout } from './icicle.js?v=11';
+import { runMorph } from './morph.js?v=11';
 
 const layouts = {
   'sunburst': sunburstLayout,
