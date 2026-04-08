@@ -324,6 +324,122 @@ svg.sunburst text.book-label.han {
 /* When reader is open, dim everything else slightly */
 body.reader-open .app { filter: brightness(0.85); }
 
+/* ── Layout switcher (bottom floating) ─────────────────── */
+
+.layout-switcher {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: rgba(20, 21, 28, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  z-index: 150;
+}
+.layout-btn {
+  background: transparent;
+  border: 0;
+  color: var(--fg-dim);
+  font-size: 18px;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  font-family: var(--font-sans);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.layout-btn:hover { color: var(--fg); }
+.layout-btn.active {
+  background: var(--bg);
+  color: var(--accent);
+}
+
+/* Stage container for active layout */
+.chart-stage {
+  transition: opacity 0.2s ease, transform 0.06s linear;
+}
+
+/* ── Icicle layout ─────────────────────────────────────── */
+
+.chart-stage canvas.icicle-canvas,
+.chart-stage svg.icicle-svg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+}
+svg.icicle-svg rect.arc {
+  transition: opacity 0.15s, filter 0.15s;
+}
+svg.icicle-svg rect.arc:hover {
+  stroke: var(--accent-strong);
+  stroke-width: 1.4;
+  filter: brightness(1.15);
+}
+svg.icicle-svg text {
+  pointer-events: none;
+  font-family: var(--font-serif);
+  fill: #f8f0d8;
+  paint-order: stroke fill;
+  stroke: rgba(0, 0, 0, 0.85);
+  stroke-width: 2.4px;
+  stroke-linejoin: round;
+  user-select: none;
+}
+svg.icicle-svg text.han { font-family: var(--font-han); }
+
+/* ── Tidy tree layout ──────────────────────────────────── */
+
+.tree-scroll {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  overflow: auto;
+  box-sizing: border-box;
+}
+svg.tree-svg { display: block; }
+svg.tree-svg circle {
+  transition: r 0.15s, stroke 0.15s;
+}
+svg.tree-svg .tree-node:hover circle {
+  r: 7;
+  stroke: var(--accent);
+}
+svg.tree-svg text {
+  pointer-events: none;
+  font-family: var(--font-serif);
+  fill: #f8f0d8;
+  paint-order: stroke fill;
+  stroke: rgba(0, 0, 0, 0.85);
+  stroke-width: 2.4px;
+  stroke-linejoin: round;
+  user-select: none;
+}
+svg.tree-svg text.han { font-family: var(--font-han); }
+svg.tree-svg text.tree-root-label {
+  fill: var(--accent-strong);
+  font-weight: 700;
+  font-size: 14px;
+}
+svg.tree-svg text.tree-chapter-label {
+  font-size: 9px;
+  fill: var(--fg-dim);
+}
+
+@media (max-width: 480px) {
+  .layout-switcher { bottom: 10px; padding: 3px; }
+  .layout-btn { width: 34px; height: 34px; font-size: 16px; }
+}
+
 /* ── Mobile / narrow viewport ──────────────────────────── */
 
 @media (max-width: 720px) {
