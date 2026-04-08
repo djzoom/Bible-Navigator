@@ -4,7 +4,7 @@ import {
   state, buildHierarchy,
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, tween,
-} from './shared.js';
+} from './shared.js?v=2';
 
 export function createTreeLayout(orientation /* 'v' | 'h' */) {
   const isVertical = orientation === 'v';
