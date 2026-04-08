@@ -3,7 +3,7 @@
 // vertices are interpolated between polar and rectangular positions.
 // At t=0 the chart looks exactly like the sunburst, at t=1 it looks exactly
 // like the icicle-v.
-import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=8';
+import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=9';
 
 // Exactly the same fractional bands as sunburst's RING:
 //   hub  [0, 0.10)  ·  testament [0.10, 0.18)  ·  group [0.18, 0.30)
@@ -134,17 +134,20 @@ export function runMorph(stage, fromId, toId, duration = 700) {
       const L = 2 * Math.PI * R * (1 - t) + H * t;  // 2πR → H
       const alpha = 2 * Math.PI * (1 - t);           // 2π → 0
 
-      let arcX, arcY, transX, transY;
+      let arcX, arcY, transX, transY, transScale;
+      const linearScale = R * (1 - t) + W * t;
 
       if (alpha < LINEAR_EPS) {
         // Near t = 1 — treat the ref curve as a straight line from G in
-        // the tangent direction.
+        // the tangent direction. The arc radius is "infinite" so the depth
+        // offset has no upper bound and we use the linear scale directly.
         const s = b * L;
         arcX = Gx + tx * s;
         arcY = Gy + ty * s;
         // Transverse direction (toward where the hub ends up): rotate90CW(τ)
         transX = -ty;
         transY = tx;
+        transScale = linearScale;
       } else {
         const rho = L / alpha;
         // Arc center = G + ρ · rotate90CW(τ). In Y-down rotate90CW = (−y, x).
@@ -164,10 +167,15 @@ export function runMorph(stage, fromId, toId, duration = 700) {
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
         transX = dx / dist;
         transY = dy / dist;
+        // Clamp the depth scale so the (1−d)·scale offset can never exceed
+        // ρ. Without this clamp, hub and testament points (large 1−d) would
+        // overshoot the arc center C and pop out on the OPPOSITE side of
+        // the canvas — visually crossing every other ring on the way. With
+        // the clamp the inner rings stay snug around C, so no polygon ever
+        // crosses another.
+        transScale = Math.min(linearScale, rho);
       }
 
-      // Depth offset: d = 1 is on the ref curve, d = 0 is all the way in.
-      const transScale = R * (1 - t) + W * t;
       const offset = (1 - d) * transScale;
 
       return [
