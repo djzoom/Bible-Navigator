@@ -5,7 +5,7 @@ import {
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, tween,
   findByPath, pathOf,
-} from './shared.js?v=12';
+} from './shared.js?v=13';
 
 // Depth bands — identical to sunburst RING so every level takes up the same
 // fraction of the depth axis in both views.

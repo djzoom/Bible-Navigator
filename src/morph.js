@@ -3,7 +3,7 @@
 // vertices are interpolated between polar and rectangular positions.
 // At t=0 the chart looks exactly like the sunburst, at t=1 it looks exactly
 // like the icicle-v.
-import { state as shared, buildHierarchy, themeTokens, tween, TAU, findByPath } from './shared.js?v=12';
+import { state as shared, buildHierarchy, themeTokens, tween, TAU, findByPath } from './shared.js?v=13';
 
 // Exactly the same fractional bands as sunburst's RING — always absolute,
 // never rescaled for focus. Sunburst and icicle both keep these band values
@@ -14,7 +14,15 @@ const BAND = [0, 0.10, 0.18, 0.30, 0.58, 1.00];
 const CHAPTER_INNER_D = BAND[4];   // 0.58
 const CHAPTER_OUTER_D = BAND[5];   // 1.00
 
-const POLY_SAMPLES = 10;  // number of sample points along the inner/outer arc
+// Maximum angular step (radians) between two adjacent sample points on a
+// polygon boundary. 0.05 rad ≈ 2.9°, which renders as a smooth circle up
+// to radius ≈ 1200 px (chord sag < 0.4 px). The polygon-sample count per
+// node is computed from this at draw time so large arcs (full-circle
+// testaments) get hundreds of samples while tiny chapter wedges only get
+// two or three.
+const MAX_STEP = 0.05;
+const MIN_SAMPLES = 2;
+const MAX_SAMPLES = 160;
 
 /**
  * Run a sunburst ⇄ icicle-v morph on `stage`.
@@ -227,24 +235,41 @@ export function runMorph(stage, fromId, toId, duration = 700) {
     }
 
     // Build a polygon for an annular-sector node (sunburst chapter becomes
-    // a rectangle as t→1). Sample N points along the outer arc and N along
-    // the inner arc.
-    // node uses local breadth (_b0/_b1) and absolute depth (d.depth).
+    // a rectangle as t→1). Sample count adapts to the node's current
+    // angular span on the reference curve so big arcs get many samples
+    // (smooth circle) and thin chapter wedges only get a handful. Without
+    // this the full-circle testament arcs in the sunburst state (t=0)
+    // visibly facet into decagons.
+    //
+    // subtendedAngle ≈ (b1 − b0) · focusSpan · α(t), where α(t) is the
+    // total angle of the reference curve. At t=0 α=2π, at t=1 α=0. We use
+    // MAX_STEP radians per sample as the target; the effective angular
+    // step of the morph curve is at most α, so dividing by MAX_STEP gives
+    // the count we need.
     function nodePolygon(node, t) {
       const b0 = node._b0, b1 = node._b1;
       if (b1 == null || b1 - b0 < 1e-7) return null;
       const d0 = bandD(node.depth, 0);
       const d1 = bandD(node.depth, 1);
+
+      // Dynamic sample count. S is captured in draw() but we don't have
+      // it here; recompute alpha directly (cheap).
+      const alpha = 2 * Math.PI * (1 - t);
+      const subtended = alpha * (b1 - b0);  // radians on the ref curve
+      let samples = Math.ceil(subtended / MAX_STEP);
+      if (samples < MIN_SAMPLES) samples = MIN_SAMPLES;
+      if (samples > MAX_SAMPLES) samples = MAX_SAMPLES;
+
       const pts = [];
       // Outer boundary (d1)
-      for (let i = 0; i <= POLY_SAMPLES; i++) {
-        const s = i / POLY_SAMPLES;
+      for (let i = 0; i <= samples; i++) {
+        const s = i / samples;
         const b = b0 + (b1 - b0) * s;
         pts.push(blend(b, d1, t));
       }
       // Inner boundary (d0) in reverse
-      for (let i = POLY_SAMPLES; i >= 0; i--) {
-        const s = i / POLY_SAMPLES;
+      for (let i = samples; i >= 0; i--) {
+        const s = i / samples;
         const b = b0 + (b1 - b0) * s;
         pts.push(blend(b, d0, t));
       }
