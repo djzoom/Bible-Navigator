@@ -5,7 +5,7 @@ import {
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, tween,
   findByPath, pathOf,
-} from './shared.js?v=14';
+} from './shared.js?v=15';
 
 // Depth bands — identical to sunburst RING so every level takes up the same
 // fraction of the depth axis in both views.
@@ -254,12 +254,14 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
       .style('cursor', 'pointer')
       .on('click', (_, d) => zoomTo(d));
 
-    // Labels: place text centered in rect, horizontal if fits, rotated 90°
-    // if the rect is tall and narrow (and that rotation fits).
-    [1, 2, 3].forEach(dep => {
+    // Testament + group labels: use the simple in-rect placement (they
+    // always have plenty of space).
+    [1, 2].forEach(dep => {
       const nodes = inner.filter(d => d.depth === dep);
       nodes.forEach(d => drawLabel(d, dep));
     });
+    // Book labels: collision-avoided so all 66 show and no two overlap.
+    drawBookLabels(inner.filter(d => d.depth === 3));
 
     // Hub (root) "Bible" label at top of stage
     const rootNode = root;
@@ -332,6 +334,114 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
     return depth === 1 ? 'testament-label'
          : depth === 2 ? 'group-label'
          : 'book-label radial';
+  }
+
+  // Draw all book labels with collision avoidance so every book shows its
+  // full name and no two labels overlap.
+  //
+  // Strategy (booksVertical):
+  //   1. For each book, compute the ideal label Y as the rect's vertical
+  //      centroid and the X as the right edge of the book column (so text
+  //      extends leftward into the column and never into the chapter band).
+  //   2. Sort by Y, two-pass relaxation with MIN_GAP vertical spacing so
+  //      adjacent labels can't touch.
+  //   3. Draw a thin leader line from the rect centroid to the shifted Y
+  //      whenever the label got pushed away from its natural position.
+  //
+  // booksHorizontal mode is symmetric (X <-> Y).
+  function drawBookLabels(books) {
+    if (!books.length) return;
+    const fontSize = 10;
+    const MIN_GAP = fontSize + 2;
+    const hanClass = state.lang === 'zh' ? ' han' : '';
+    const layer = g.append('g').attr('class', 'book-labels');
+
+    // 1. Compute natural positions + label text
+    const placed = books.map(d => {
+      const text = bookLabel(d.data.name, state.lang);
+      const isCJK = /[\u3000-\u9fff]/.test(text);
+      const charW = isCJK ? fontSize * 1.05 : fontSize * 0.55;
+      const textW = text.length * charW;
+      if (booksVertical) {
+        return {
+          d, text, textW,
+          // Anchor at the right edge of the book column, text flows left.
+          anchorX: d.rx + d.rw - 4,
+          anchorY: d.ry + d.rh / 2,
+          naturalY: d.ry + d.rh / 2,
+          y: d.ry + d.rh / 2,
+        };
+      } else {
+        return {
+          d, text, textW,
+          anchorX: d.rx + d.rw / 2,
+          anchorY: d.ry + d.rh - 4,
+          naturalY: d.rx + d.rw / 2,
+          y: d.rx + d.rw / 2,
+        };
+      }
+    });
+
+    // 2. Sort by natural position and relax
+    placed.sort((a, b) => a.naturalY - b.naturalY);
+    // Forward pass: push down
+    for (let i = 1; i < placed.length; i++) {
+      if (placed[i].y - placed[i - 1].y < MIN_GAP) {
+        placed[i].y = placed[i - 1].y + MIN_GAP;
+      }
+    }
+    // Backward pass: push up (so we don't run off the bottom edge)
+    for (let i = placed.length - 2; i >= 0; i--) {
+      if (placed[i + 1].y - placed[i].y < MIN_GAP) {
+        placed[i].y = placed[i + 1].y - MIN_GAP;
+      }
+    }
+
+    // 3. Draw leader (if shifted) + text
+    for (const p of placed) {
+      const shifted = Math.abs(p.y - p.naturalY) > 0.5;
+      if (booksVertical) {
+        if (shifted) {
+          layer.append('line')
+            .attr('x1', p.d.rx + p.d.rw)
+            .attr('y1', p.anchorY)
+            .attr('x2', p.anchorX)
+            .attr('y2', p.y)
+            .attr('stroke', 'var(--fg-dim)')
+            .attr('stroke-width', 0.5)
+            .attr('opacity', 0.6);
+        }
+        layer.append('text')
+          .attr('class', `book-label${hanClass}`)
+          .attr('x', p.anchorX)
+          .attr('y', p.y)
+          .attr('text-anchor', 'end')
+          .attr('dominant-baseline', 'middle')
+          .style('font-size', fontSize + 'px')
+          .text(p.text);
+      } else {
+        // Horizontal books layout: place labels below each book column,
+        // collision-resolved on X instead of Y.
+        if (shifted) {
+          layer.append('line')
+            .attr('x1', p.naturalY)
+            .attr('y1', p.d.ry + p.d.rh)
+            .attr('x2', p.y)
+            .attr('y2', p.anchorY + 8)
+            .attr('stroke', 'var(--fg-dim)')
+            .attr('stroke-width', 0.5)
+            .attr('opacity', 0.6);
+        }
+        layer.append('text')
+          .attr('class', `book-label${hanClass}`)
+          .attr('x', p.y)
+          .attr('y', p.anchorY + 8)
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'hanging')
+          .style('font-size', fontSize + 'px')
+          .text(p.text);
+      }
+    }
   }
 
   // ── Interactions ──────────────────────────────────────
