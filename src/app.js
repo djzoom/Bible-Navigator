@@ -1,10 +1,10 @@
 // App entry — loads data, wires up shared controls + layout switcher.
 import {
   state as shared, applyI18n, closeReader, refreshReaderIfOpen, $,
-} from './shared.js?v=11';
-import { sunburstLayout } from './sunburst.js?v=11';
-import { createIcicleLayout } from './icicle.js?v=11';
-import { runMorph } from './morph.js?v=11';
+} from './shared.js?v=12';
+import { sunburstLayout } from './sunburst.js?v=12';
+import { createIcicleLayout } from './icicle.js?v=12';
+import { runMorph } from './morph.js?v=12';
 
 const layouts = {
   'sunburst': sunburstLayout,
@@ -16,16 +16,21 @@ let stage = null;
 
 async function init() {
   shared.lang = localStorage.getItem('bs-lang') || 'en';
+  shared.focusPath = [];
   document.documentElement.classList.remove('light');
   localStorage.removeItem('bs-theme');
 
-  const res = await fetch('./data/bible.json');
-  shared.data = await res.json();
+  // Kick off the data fetch in parallel with DOM prep. The file is a
+  // small static JSON so a single GET is enough — caching is handled
+  // by the HTTP layer. applyI18n + bindControls don't need the data.
+  const dataPromise = fetch('./data/bible.json').then(r => r.json());
 
   stage = $('.chart-stage');
   applyI18n();
   bindControls();
   bindGestures();
+
+  shared.data = await dataPromise;
 
   const initial = layouts[location.hash.slice(1)] ? location.hash.slice(1) : 'sunburst';
   switchTo(initial, { immediate: true });
@@ -96,6 +101,7 @@ function bindControls() {
     refreshReaderIfOpen();
   });
   $('#btn-reset').addEventListener('click', () => {
+    shared.focusPath = [];
     if (active?.zoomToRoot) active.zoomToRoot();
   });
   $('#reader-close').addEventListener('click', closeReader);

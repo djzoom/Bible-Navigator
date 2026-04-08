@@ -5,7 +5,8 @@ import {
   state as shared, buildHierarchy, themeTokens,
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, TAU, debounce,
-} from './shared.js?v=11';
+  findByPath, pathOf,
+} from './shared.js?v=12';
 
 // Radial bands (fraction of overall radius)
 //   hub  →  testament  →  group  →  book  →  chapter
@@ -44,12 +45,25 @@ function createSunburstLayout() {
       d.X0 = d.x0; d.X1 = d.x1;
     });
     chapters = root.descendants().filter(d => d.depth === 4);
-    focus = root;
+
+    // Restore focus from shared.focusPath (so focus survives layout switches)
+    focus = findByPath(root, shared.focusPath) || root;
+    if (focus !== root) applyFocusAngles(focus);
 
     setup();
     render();
     resizeHandler = debounce(() => { setup(); render(); }, 120);
     window.addEventListener('resize', resizeHandler);
+  }
+
+  // Stretch the focus subtree to fill the full circle without animation.
+  // Mirrors the target state that zoomTo eases into.
+  function applyFocusAngles(f) {
+    const span = f.X1 - f.X0;
+    root.each(d => {
+      d.x0 = Math.max(0, Math.min(1, (d.X0 - f.X0) / span)) * TAU;
+      d.x1 = Math.max(0, Math.min(1, (d.X1 - f.X0) / span)) * TAU;
+    });
   }
 
   function unmount() {
@@ -524,6 +538,8 @@ function createSunburstLayout() {
       target = root;
     }
     focus = target;
+    // Persist focus for layout switches
+    shared.focusPath = pathOf(focus);
 
     const span = focus.X1 - focus.X0;
     root.each(d => {
