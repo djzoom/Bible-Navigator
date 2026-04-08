@@ -1,13 +1,18 @@
-# Bible Sunburst
+# Bible Topology · 圣经章节拓扑
 
-A radial hierarchical visualization of the entire Protestant Bible — Testament → Book → Chapter — drawn as a clock-face sunburst with D3.js.
+A hierarchical structure explorer for the entire Protestant Bible —
+**Testament → Group → Book → Chapter → Verse**. Built with D3.js as a tool
+for studying the chapter topology of Scripture.
 
 - **66 books · 1,189 chapters · 31,102 verses** (KJV verse counts)
-- Arc length is weighted by verse count
-- Hover any chapter to see its verse count
-- Click any book to zoom in; click the center to reset
-- Toggle 中 / EN and dark / light themes
-- Zero build, single static folder, deploy anywhere
+- Multiple visualization layouts (radial sunburst today; rectangular tree layouts planned)
+- Arc / rectangle size is weighted by verse count
+- Hover any chapter to see its verse count; click to read the full chapter text
+- Click any book / group / testament to zoom in; click the center to reset
+- Click chapters to read KJV or 和合本 scripture in a side drawer
+- Pinch / wheel zoom and pan on touch devices
+- 中 / EN switch, dark theme
+- Zero build, single static folder, deploys to GitHub Pages
 
 ## Run locally
 
@@ -46,7 +51,7 @@ A static server is required because `index.html` fetches `data/bible.json`.
 **Option A — iframe**
 
 ```html
-<iframe src="https://yoursite.com/bible-sunburst/" width="900" height="900" frameborder="0"></iframe>
+<iframe src="https://yoursite.com/bible-topology/" width="900" height="900" frameborder="0"></iframe>
 ```
 
 **Option B — copy the folder** into your site at any path. The fetch URL `./data/bible.json` is relative, so it just works.
