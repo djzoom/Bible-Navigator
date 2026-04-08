@@ -4,7 +4,7 @@ import {
   state, buildHierarchy, themeTokens,
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, tween,
-} from './shared.js?v=4';
+} from './shared.js?v=5';
 
 // Depth bands as fractions of the "depth" axis (top-to-bottom for vertical,
 // left-to-right for horizontal).
