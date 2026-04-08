@@ -4,7 +4,8 @@ import {
   state, buildHierarchy, themeTokens,
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, tween,
-} from './shared.js?v=11';
+  findByPath, pathOf,
+} from './shared.js?v=12';
 
 // Depth bands — identical to sunburst RING so every level takes up the same
 // fraction of the depth axis in both views.
@@ -33,7 +34,8 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
     stage = container;
     root = buildHierarchy(state.data);
     chapters = root.descendants().filter(d => d.depth === 4);
-    focus = root;
+    // Restore focus from shared state so it survives layout switches.
+    focus = findByPath(root, state.focusPath) || root;
 
     setup();
     render();
@@ -122,24 +124,19 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
     const focusX0 = focus.X0, focusX1 = focus.X1, span = focusX1 - focusX0;
     const focusDepth = focus.depth;
 
-    // When zoomed into a focus at depth F, stretch the visible depth band
-    // [BAND[F], 1] back onto the full depth axis, and hide anything shallower.
-    const bandMin = BAND[focusDepth];
-    const bandRange = 1 - bandMin;
-
+    // Match the sunburst's focus semantics: stretch the focus subtree's
+    // breadth to fill the breadth axis. DEPTH bands always use absolute
+    // BAND values so the levels above focus stay visible (as full-width
+    // strips), the focus itself is a full-width strip, and its descendants
+    // are subdivided beneath it — a direct rectangular analogue of the
+    // sunburst's behavior.
     root.each(d => {
-      // Breadth along the book axis (x or y depending on orientation)
       const bx0 = (Math.max(0, Math.min(1, (d.X0 - focusX0) / span))) * breadth;
       const bx1 = (Math.max(0, Math.min(1, (d.X1 - focusX0) / span))) * breadth;
-
-      // Depth using the BAND proportions (same fractions as the sunburst).
-      // If d is shallower than the focus it collapses to zero width.
-      const raw0 = BAND[Math.max(0, d.depth)];
+      const raw0 = BAND[Math.max(0, d.depth)] ?? 0;
       const raw1 = BAND[Math.max(0, d.depth + 1)] ?? 1;
-      const fr0 = Math.max(0, Math.min(1, (raw0 - bandMin) / bandRange));
-      const fr1 = Math.max(0, Math.min(1, (raw1 - bandMin) / bandRange));
-      const dy0 = fr0 * depth;
-      const dy1 = fr1 * depth;
+      const dy0 = raw0 * depth;
+      const dy1 = raw1 * depth;
 
       d.bx0 = bx0; d.bx1 = bx1;
       d.dy0 = dy0; d.dy1 = dy1;
@@ -392,6 +389,8 @@ export function createIcicleLayout(orientation /* 'v' | 'h' */) {
     else if (target === focus) return;
 
     focus = target;
+    // Persist focus for layout switches
+    state.focusPath = pathOf(focus);
 
     // Snapshot current rects
     root.each(d => {

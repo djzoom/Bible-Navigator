@@ -3,13 +3,16 @@
 // vertices are interpolated between polar and rectangular positions.
 // At t=0 the chart looks exactly like the sunburst, at t=1 it looks exactly
 // like the icicle-v.
-import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=11';
+import { state as shared, buildHierarchy, themeTokens, tween, TAU, findByPath } from './shared.js?v=12';
 
-// Exactly the same fractional bands as sunburst's RING:
-//   hub  [0, 0.10)  ·  testament [0.10, 0.18)  ·  group [0.18, 0.30)
-//   book [0.30, 0.58)  ·  chapter [0.58, 1.00]
-// Icicle uses the same numbers so the transition is proportionally seamless.
+// Exactly the same fractional bands as sunburst's RING — always absolute,
+// never rescaled for focus. Sunburst and icicle both keep these band values
+// when focused; they only stretch the breadth (angular / horizontal) axis.
+//   hub [0, .10) · testament [.10, .18) · group [.18, .30)
+//   book [.30, .58) · chapter [.58, 1.00]
 const BAND = [0, 0.10, 0.18, 0.30, 0.58, 1.00];
+const CHAPTER_INNER_D = BAND[4];   // 0.58
+const CHAPTER_OUTER_D = BAND[5];   // 1.00
 
 const POLY_SAMPLES = 10;  // number of sample points along the inner/outer arc
 
@@ -36,20 +39,46 @@ export function runMorph(stage, fromId, toId, duration = 700) {
     const root = buildHierarchy(shared.data);
     d3.partition().size([1, 1]).padding(0)(root);
 
-    // For each node, compute both the polar centroid/band and the rect box.
-    // Breadth = x0/x1 (fractions of full circle / full width).
-    // Depth is fixed by BAND[depth]..BAND[depth+1].
-    const nodes = root.descendants();
-    const chapters = nodes.filter(d => d.depth === 4);
-    const books    = nodes.filter(d => d.depth === 3);
-    const groups   = nodes.filter(d => d.depth === 2);
-    const testaments = nodes.filter(d => d.depth === 1);
+    // Resolve the currently-focused node. Both sunburst and icicle
+    // persist it on shared.focusPath. Ancestors of the focus stay visible
+    // (as full-breadth rings / strips), matching the existing sunburst
+    // behavior — so we walk the ENTIRE tree and stretch each node's
+    // breadth by the focus subtree's span.
+    const focus = findByPath(root, shared.focusPath) || root;
+    const focusX0 = focus.x0;
+    const focusX1 = focus.x1;
+    const focusSpan = focusX1 - focusX0 || 1;
+
+    // Remap each node's absolute breadth into [0, 1] relative to focus.
+    // Nodes outside the focus subtree (e.g. OT books when focus = Gospels)
+    // collapse to zero breadth and are skipped by the polygon builder.
+    root.each(d => {
+      d._b0 = (Math.max(focusX0, Math.min(focusX1, d.x0)) - focusX0) / focusSpan;
+      d._b1 = (Math.max(focusX0, Math.min(focusX1, d.x1)) - focusX0) / focusSpan;
+    });
+
+    const nodesByDepth = [[], [], [], [], []];
+    root.each(d => { if (d.depth >= 0 && d.depth <= 4) nodesByDepth[d.depth].push(d); });
+    const testaments = nodesByDepth[1];
+    const groups     = nodesByDepth[2];
+    const books      = nodesByDepth[3];
+    const chapters   = nodesByDepth[4];
 
     // Canvas radii / rectangle dimensions
     const isMobile = w < 720 || h < 720;
     const vMargin = isMobile ? 4 : 8;
     const hMargin = isMobile ? 14 : 22;
     const R = Math.min(w / 2 - hMargin, h / 2 - vMargin);
+
+    // Depth band lookup. Both layouts keep absolute BAND values, so all
+    // depths — even ancestors of the focus — render at their real radial
+    // fractions throughout the morph.
+    function bandD(absDepth, offset = 0) {
+      const idx = absDepth + offset;
+      if (idx < 0) return 0;
+      if (idx >= BAND.length) return 1;
+      return BAND[idx];
+    }
 
     // For vertical icicle: full width (W) and full height (H).
     const W = w;
@@ -200,12 +229,12 @@ export function runMorph(stage, fromId, toId, duration = 700) {
     // Build a polygon for an annular-sector node (sunburst chapter becomes
     // a rectangle as t→1). Sample N points along the outer arc and N along
     // the inner arc.
+    // node uses local breadth (_b0/_b1) and absolute depth (d.depth).
     function nodePolygon(node, t) {
-      const b0 = node.x0, b1 = node.x1;
-      const depth = node.depth;
-      const d0 = BAND[depth];
-      const d1 = BAND[depth + 1];
-      if (b1 - b0 < 1e-7) return null;
+      const b0 = node._b0, b1 = node._b1;
+      if (b1 == null || b1 - b0 < 1e-7) return null;
+      const d0 = bandD(node.depth, 0);
+      const d1 = bandD(node.depth, 1);
       const pts = [];
       // Outer boundary (d1)
       for (let i = 0; i <= POLY_SAMPLES; i++) {
@@ -237,29 +266,24 @@ export function runMorph(stage, fromId, toId, duration = 700) {
       const TK = themeTokens();
       const S = tState(t);  // shared with tick / boundary code below
 
-      // Draw from deepest ring outward so the hub stays on top.
-      // Actually draw from shallowest to deepest so chapters are on top.
-      // Testament (1)
-      for (const d of testaments) {
-        const poly = nodePolygon(d, t);
-        drawPolygon(poly, d.data.name === 'OT'
-          ? getComputedStyle(document.documentElement).getPropertyValue('--ot-fill').trim() || '#261810'
-          : getComputedStyle(document.documentElement).getPropertyValue('--nt-fill').trim() || '#0a1822');
+      // Draw from shallowest (testaments) to deepest (chapters) so the
+      // outer rings stay on top.
+      const otFill = getComputedStyle(document.documentElement).getPropertyValue('--ot-fill').trim() || '#261810';
+      const ntFill = getComputedStyle(document.documentElement).getPropertyValue('--nt-fill').trim() || '#0a1822';
+      for (let dep = 1; dep <= 4; dep++) {
+        const layer = nodesByDepth[dep];
+        if (!layer) continue;
+        for (const d of layer) {
+          const fill = dep === 1
+            ? (d.data.name === 'OT' ? otFill : ntFill)
+            : (d.color || '#555');
+          drawPolygon(nodePolygon(d, t), fill);
+        }
       }
-      // Group (2)
-      for (const d of groups) drawPolygon(nodePolygon(d, t), d.color);
-      // Book (3)
-      for (const d of books) drawPolygon(nodePolygon(d, t), d.color);
-      // Chapter (4)
-      for (const d of chapters) drawPolygon(nodePolygon(d, t), d.color);
 
       // ── 5. Verse tick marks within each chapter ──
-      // The chapter ring's "明暗" (brightness) variation in both the sunburst
-      // and the icicle final views comes from a combination of the per-chapter
-      // lightness ramp AND thin verse tick lines across the outer ~18 % of
-      // each chapter cell. Without these ticks the morph's mid-frames lose
-      // the textured striping that makes the outer ring read as detailed.
-      const chapBand = 1 - BAND[4];
+      const chapInnerD = CHAPTER_INNER_D;
+      const chapBand = CHAPTER_OUTER_D - chapInnerD;
       const tickInnerD = 1 - 0.18 * chapBand;
       ctx.lineWidth = 0.4;
       ctx.strokeStyle = TK.tick;
@@ -267,13 +291,13 @@ export function runMorph(stage, fromId, toId, duration = 700) {
       for (const c of chapters) {
         const verses = c.value;
         if (verses < 2) continue;
-        const span = c.x1 - c.x0;
+        const span = c._b1 - c._b0;
         // Skip if individual verses would be smaller than ~1.4 px on the
         // outer edge of the ref curve (S.L · span is the outer arc length).
         const outerLen = S.L * span;
         if (outerLen / verses < 1.4) continue;
         for (let i = 1; i < verses; i++) {
-          const bv = c.x0 + (i / verses) * span;
+          const bv = c._b0 + (i / verses) * span;
           const [x0, y0] = blend(bv, tickInnerD, t);
           const [x1, y1] = blend(bv, 1, t);
           ctx.moveTo(x0, y0);
@@ -283,8 +307,6 @@ export function runMorph(stage, fromId, toId, duration = 700) {
       ctx.stroke();
 
       // ── 6. Chapter boundary lines (within the same book) ──
-      // Same role as in sunburst.js / icicle.js: a slightly thicker stroke
-      // between adjacent chapters of the same book.
       ctx.lineWidth = 0.7;
       ctx.strokeStyle = TK.chap;
       ctx.beginPath();
@@ -292,23 +314,21 @@ export function runMorph(stage, fromId, toId, duration = 700) {
         const c0 = chapters[i];
         const c1 = chapters[i + 1];
         if (c1.parent !== c0.parent) continue;
-        const bb = c0.x1;  // shared breadth
-        const [x0, y0] = blend(bb, BAND[4], t);
+        const bb = c0._b1;  // shared local breadth
+        const [x0, y0] = blend(bb, chapInnerD, t);
         const [x1, y1] = blend(bb, 1, t);
         ctx.moveTo(x0, y0);
         ctx.lineTo(x1, y1);
       }
       ctx.stroke();
 
-      // ── 7. Book boundary lines (across the chapter band only) ──
-      // Strongest separator: the line between two adjacent books inside the
-      // chapter ring.
+      // ── 7. Book boundary lines ──
       ctx.lineWidth = 1.1;
       ctx.strokeStyle = TK.book;
       ctx.beginPath();
       for (const bk of books) {
-        const bb = bk.x1;
-        const [x0, y0] = blend(bb, BAND[4], t);
+        const bb = bk._b1;
+        const [x0, y0] = blend(bb, chapInnerD, t);
         const [x1, y1] = blend(bb, 1, t);
         ctx.moveTo(x0, y0);
         ctx.lineTo(x1, y1);

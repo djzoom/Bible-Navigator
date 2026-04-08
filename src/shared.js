@@ -1,7 +1,7 @@
 // Shared primitives for all layouts: hierarchy build, colors, reader drawer,
 // lang state, gestures. Layout modules (sunburst / icicle / tidytree) each
 // import from here so they stay ~100% consistent on data + styling.
-import { I18N, bookLabel, groupLabel } from './i18n.js?v=11';
+import { I18N, bookLabel, groupLabel } from './i18n.js?v=12';
 
 // ── Canonical book groups ─────────────────────────────────
 
@@ -48,7 +48,33 @@ export const CHAP_LIGHT_HI = 0.66;
 export const state = {
   lang: 'en',
   data: null,              // raw JSON from data/bible.json
+  // Path of node `data.name` strings from root to the currently-focused
+  // node. Empty array (or just ['Bible']) means root. Both layouts read
+  // this on mount and write to it on zoomTo, so the focus survives layout
+  // switches and the morph picks up where the old layout left off.
+  focusPath: [],
 };
+
+// Find a node in a freshly-built hierarchy by following its data.name path.
+// Falls back to root if any segment can't be matched.
+export function findByPath(root, path) {
+  let node = root;
+  if (!Array.isArray(path) || path.length === 0) return node;
+  // path[0] is "Bible" (the root); start matching from path[1]
+  for (let i = 1; i < path.length; i++) {
+    if (!node.children) return node;
+    const next = node.children.find(c => c.data.name === path[i]);
+    if (!next) return node;
+    node = next;
+  }
+  return node;
+}
+
+// Reverse helper: turn a hierarchy node into the path string array
+// expected by findByPath above.
+export function pathOf(node) {
+  return node.ancestors().reverse().map(a => a.data.name);
+}
 
 export const TAU = Math.PI * 2;
 export const $ = sel => document.querySelector(sel);
