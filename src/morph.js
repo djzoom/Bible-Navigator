@@ -3,7 +3,7 @@
 // vertices are interpolated between polar and rectangular positions.
 // At t=0 the chart looks exactly like the sunburst, at t=1 it looks exactly
 // like the icicle-v.
-import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=7';
+import { state as shared, buildHierarchy, themeTokens, tween, TAU } from './shared.js?v=8';
 
 // Exactly the same fractional bands as sunburst's RING:
 //   hub  [0, 0.10)  ·  testament [0.10, 0.18)  ·  group [0.18, 0.30)
@@ -76,35 +76,103 @@ export function runMorph(stage, fromId, toId, duration = 700) {
     ctx.scale(dpr, dpr);
     ctx.translate(w / 2, h / 2);    // origin at center
 
-    // Direct polar ↔ rectangular blend — no rigid rotation, no spin, no
-    // mirror flipping. Every node's position interpolates in a straight
-    // line between its sunburst coordinate and its icicle coordinate. The
-    // outer cubic ease makes the motion start and end gently so the
-    // topological change (ring opening up into a list) is continuous.
+    // Outward Arc Slide (2D, no overlap, no mirror/3D cues):
     //
-    //   Genesis (b≈0, angle -π/2)  →  top of the vertical list (y = -H/2)
-    //   Middle book (b≈0.5, angle +π/2, bottom of sunburst)  →  middle (y = 0)
-    //   Revelation (b≈1, angle wraps to -π/2)  →  bottom of the list (y = +H/2)
+    // There is a single reference curve at the outer edge of the chapter
+    // ring (d = 1). This curve is ALWAYS a circular arc of a single smoothly
+    // varying radius, length and orientation, morphing from a full circle
+    // at t = 0 into a straight vertical line at t = 1.
     //
-    // Because Genesis and Revelation share the same sunburst point (the
-    // seam at 12 o'clock) but different icicle destinations, the morph
-    // inherently separates them — that separation IS the topological
-    // change from a closed ring into an open line, and making every
-    // node's path a straight line is the shortest and smoothest way to
-    // show it.
+    //   t = 0 : full circle of radius R, Genesis pinned at (0, -R), curve
+    //           traversed clockwise so breadth b = 0 is at 12 o'clock and
+    //           b = 1 wraps back onto Genesis (closed ring).
+    //   t = 1 : vertical line at x = 0.5·W, running from (0.5·W, -H/2) down
+    //           to (0.5·W, +H/2), Genesis at the top and Revelation at the
+    //           bottom.
     //
-    // Running t from 1 → 0 plays the reverse automatically: the line
-    // closes back into the ring.
+    // For intermediate t, the arc length L(t) interpolates from 2π·R → H,
+    // the subtended angle α(t) interpolates from 2π → 0, so the radius
+    // ρ(t) = L(t)/α(t) grows smoothly from R to infinity. The arc's
+    // starting point G(t) and its starting tangent τ(t) both interpolate
+    // linearly, which places the arc in the plane and rotates it so that
+    // Genesis's tangent points from east (t=0) to south (t=1).
+    //
+    // A point at breadth b is at arc-length s = b · L(t) along this curve,
+    // measured from Genesis going in the traversal direction. At t = 0
+    // that direction is clockwise around the ring; as the curve opens,
+    // Revelation slides continuously along the OUTSIDE of the (shrinking)
+    // loop until, at t = 1, it has arrived at the bottom of the vertical
+    // line. It never passes through the interior of the former ring and
+    // never overlaps with any other book's trajectory.
+    //
+    // The depth coordinate d is applied as a transverse offset from the
+    // reference curve toward the "inside" (the arc's center, or leftward
+    // at t = 1). The offset magnitude is (1 − d) · transScale(t), where
+    // transScale(t) = (1 − t)·R + t·W. This makes d = 1 stay on the
+    // reference curve, d = 0 land on the hub (at origin at t = 0, at
+    // x = −W/2 at t = 1), and d = 0.58 (inner edge of the chapter ring)
+    // sit at the inner wall of the chapter band throughout.
+    //
+    // Because the whole mapping is a pure 2D parameterisation with a
+    // strictly monotonic arc-length coordinate, no polygon ever passes
+    // over another and there is no 3D / mirror illusion.
+    //
+    // Running t backwards plays the mirror motion automatically: the
+    // vertical line gently curls back into the ring.
+    const LINEAR_EPS = 0.002;  // switch to straight-line formula when α drops below this
     function blend(b, d, t) {
-      const baseAngle = b * TAU - Math.PI / 2;     // Genesis at 12 o'clock
-      const r = d * R;
-      const polarX = Math.cos(baseAngle) * r;
-      const polarY = Math.sin(baseAngle) * r;
-      const rectX = (d - 0.5) * W;
-      const rectY = (b - 0.5) * H;
+      // Reference curve parameters
+      const tangentAngle = t * Math.PI / 2;        // 0 → π/2 (east → south)
+      const tx = Math.cos(tangentAngle);
+      const ty = Math.sin(tangentAngle);
+
+      // Starting point G(t) of the reference curve (Genesis, at outer ring d=1)
+      const Gx = 0 * (1 - t) + (0.5 * W) * t;      // 0 → 0.5·W
+      const Gy = -R * (1 - t) + (-H / 2) * t;      // -R → -H/2
+
+      // Length, subtended angle, radius
+      const L = 2 * Math.PI * R * (1 - t) + H * t;  // 2πR → H
+      const alpha = 2 * Math.PI * (1 - t);           // 2π → 0
+
+      let arcX, arcY, transX, transY;
+
+      if (alpha < LINEAR_EPS) {
+        // Near t = 1 — treat the ref curve as a straight line from G in
+        // the tangent direction.
+        const s = b * L;
+        arcX = Gx + tx * s;
+        arcY = Gy + ty * s;
+        // Transverse direction (toward where the hub ends up): rotate90CW(τ)
+        transX = -ty;
+        transY = tx;
+      } else {
+        const rho = L / alpha;
+        // Arc center = G + ρ · rotate90CW(τ). In Y-down rotate90CW = (−y, x).
+        const Cx = Gx + rho * -ty;
+        const Cy = Gy + rho * tx;
+        // Angle from center C to G
+        const phi0 = Math.atan2(Gy - Cy, Gx - Cx);
+        // Traverse along arc by arc-length s. Going clockwise in Y-down
+        // means the math angle INCREASES.
+        const s = b * L;
+        const phi = phi0 + s / rho;
+        arcX = Cx + rho * Math.cos(phi);
+        arcY = Cy + rho * Math.sin(phi);
+        // Transverse (inward) direction: from the arc point toward C.
+        const dx = Cx - arcX;
+        const dy = Cy - arcY;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        transX = dx / dist;
+        transY = dy / dist;
+      }
+
+      // Depth offset: d = 1 is on the ref curve, d = 0 is all the way in.
+      const transScale = R * (1 - t) + W * t;
+      const offset = (1 - d) * transScale;
+
       return [
-        polarX + (rectX - polarX) * t,
-        polarY + (rectY - polarY) * t,
+        arcX + transX * offset,
+        arcY + transY * offset,
       ];
     }
 
