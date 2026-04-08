@@ -5,7 +5,7 @@ import {
   state as shared, buildHierarchy, themeTokens,
   openReader, showTooltip, hideTooltip,
   bookLabel, groupLabel, I18N, TAU, debounce,
-} from './shared.js?v=6';
+} from './shared.js?v=7';
 
 // Radial bands (fraction of overall radius)
 //   hub  →  testament  →  group  →  book  →  chapter
